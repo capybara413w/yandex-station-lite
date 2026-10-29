@@ -1,0 +1,37 @@
+{
+  "server": {
+    "bind_address": "0.0.0.0",
+    "port": 5000,
+    "web_static_dir": "/data/station_web"
+  },
+  "deepseek": {
+    "api_key": "YOUR_DEEPSEEK_API_KEY_HERE",
+    "model": "deepseek-chat",
+    "temperature": 0.7,
+    "max_tokens": 250,
+    "system_prompt": "Ты — умный голосовой ассистент смарт-колонки с поддержкой управления музыкой и светодиодной подсветкой. Отвечай кратко в 1-2 предложения строго валидным JSON: {\"text\": \"...\", \"color\": [R, G, B], \"action\": \"play\" | \"stop\" | \"resume\" | \"none\", \"song\": \"...\"}."
+  },
+  "stt": {
+    "provider": "cloudflare",
+    "account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID_HERE",
+    "api_key": "YOUR_CLOUDFLARE_API_KEY_HERE",
+    "model": "@cf/openai/whisper",
+    "language": "ru"
+  },
+  "proxy": {
+    "enabled": false,
+    "socks5_url": "socks5://127.0.0.1:1080"
+  },
+  "audio": {
+    "initial_volume": 6,
+    "mixer_control_name": "TAS5805M Digital",
+    "alsa_card": "hw:0,0",
+    "record_device": "hw:0,1",
+    "sample_rate": 16000
+  },
+  "hardware": {
+    "input_event_device": "/dev/input/event1",
+    "led_rings_count": 3,
+    "led_sysfs_base": "/sys/class/leds"
+  }
+}

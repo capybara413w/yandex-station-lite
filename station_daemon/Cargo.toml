@@ -1,0 +1,37 @@
+[package]
+name = "station_daemon"
+version = "0.1.0"
+edition = "2021"
+authors = ["Yandex Station Lite Autonomous Project"]
+description = "Lightweight autonomous on-device daemon for Yandex Station Lite v1 (Amlogic A113X aarch64)"
+
+[dependencies]
+# Async runtime (optimized for minimal footprint on 238MB RAM)
+tokio = { version = "1.41", features = ["rt-multi-thread", "sync", "time", "io-util", "macros"] }
+
+# Lightweight Web Server & Static Files
+axum = { version = "0.7", default-features = false, features = ["tokio", "http1", "json", "query"] }
+tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+tower = { version = "0.5", features = ["util"] }
+
+# HTTP Client with Rustls and SOCKS5 Proxy support (for DeepSeek/STT bypass)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "socks", "json", "stream", "multipart"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+urlencoding = "2.1"
+
+# Hardware buttons input handling via Linux evdev
+evdev = "0.12"
+
+# Structured lightweight logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[profile.release]
+opt-level = "z"        # Optimize for binary size
+lto = true             # Enable link-time optimization
+codegen-units = 1      # Maximize size reductions
+panic = "abort"        # Remove unwinding tables
+strip = true           # Automatically strip symbols from the binary

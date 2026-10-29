@@ -1,0 +1,8 @@
+{
+  "name": "Yandex Station Lite Control Center",
+  "description": "SoundCloud Streaming, DeepSeek LLM assistant, and ADB audio/LED control center for Yandex Station Lite",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

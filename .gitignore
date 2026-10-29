@@ -1,0 +1,27 @@
+# API Keys and sensitive configs
+server/config.json
+server/api_*.txt
+*.env
+*.key
+*.pem
+
+# Audio cache and temporary media
+server/music_cache/
+*.mp3
+*.m4a
+*.wav
+*.flac
+/tmp/
+
+# Python cache and environments
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# System and IDE
+*.log
+.vscode/
+.idea/
