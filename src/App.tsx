@@ -143,9 +143,32 @@ const DEFAULT_ASSISTANT_PROMPT = `Ты — умный голосовой асс�
   "song": "Поисковый запрос для SoundCloud"
 }`;
 
+export interface BoykisserMascot {
+  id: number;
+  name: string;
+  title: string;
+  src: string;
+}
+
+export const BOYKISSER_MASCOTS: BoykisserMascot[] = [
+  { id: 1, name: 'Пойман', title: 'Пойман за шкирку', src: '/assets/boykisser/boykisser_1.png' },
+  { id: 2, name: 'Радостный', title: 'Счастливый >w<', src: '/assets/boykisser/boykisser_2.png' },
+  { id: 3, name: 'Пухляш', title: 'Пухлый бойкисер', src: '/assets/boykisser/boykisser_3.png' },
+  { id: 4, name: 'Лапка', title: 'Пиксельная лапка', src: '/assets/boykisser/boykisser_4.png' },
+  { id: 5, name: 'Смущённый', title: 'В замешательстве', src: '/assets/boykisser/boykisser_5.png' },
+];
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'home' | 'music' | 'assistant' | 'led' | 'terminal' | 'settings'>('home');
   const [isBoykisserModalOpen, setIsBoykisserModalOpen] = useState(false);
+  const [activeMascotId, setActiveMascotId] = useState<number>(() => {
+    return parseInt(localStorage.getItem('active_boykisser_id') || '3');
+  });
+  const activeMascot = BOYKISSER_MASCOTS.find(m => m.id === activeMascotId) || BOYKISSER_MASCOTS[2];
+  const handleSelectMascot = (id: number) => {
+    setActiveMascotId(id);
+    localStorage.setItem('active_boykisser_id', id.toString());
+  };
 
   const [config, setConfig] = useState<Config>({});
   const [playerStatus, setPlayerStatus] = useState<PlayerStatus>({
@@ -952,11 +975,13 @@ export default function App() {
         <div 
           className="m3-avatar-scallop" 
           onClick={() => setIsBoykisserModalOpen(true)}
-          title="Furry station v0.1 • boykisser"
+          title="Маскот станции (нажмите для смены)"
         >
-          <svg viewBox="0 0 100 100" className="m3-avatar-scallop-svg">
-            <path d="M50 4 C58 4 62 10 68 12 C74 14 80 13 85 18 C90 23 89 29 93 35 C97 41 103 45 103 52 C103 59 97 63 93 69 C89 75 90 81 85 86 C80 91 74 90 68 92 C62 94 58 100 50 100 C42 100 38 94 32 92 C26 90 20 91 15 86 C10 81 11 75 7 69 C3 63 -3 59 -3 52 C-3 45 3 41 7 35 C11 29 10 23 15 18 C20 13 26 14 32 12 C38 10 42 4 50 4 Z" transform="translate(0, -2)" />
-          </svg>
+          <img 
+            src={activeMascot.src} 
+            alt={activeMascot.name} 
+            style={{ width: '54px', height: '54px', objectFit: 'contain', filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.5))', transition: 'transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)' }} 
+          />
         </div>
 
         {/* Rail Destinations */}
@@ -1051,10 +1076,11 @@ export default function App() {
             type="button" 
             className="m3-boykisser-chip"
             onClick={() => setIsBoykisserModalOpen(true)}
-            title="Информация о станции"
+            title="Выбор маскота станции"
           >
-            <span>boykisser</span>
-            <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>pets</span>
+            <img src={activeMascot.src} alt="Mascot" style={{ width: '24px', height: '24px', objectFit: 'contain' }} />
+            <span>{activeMascot.name}</span>
+            <span className="material-symbols-rounded" style={{ fontSize: '18px', color: '#ffb4c2' }}>pets</span>
           </button>
         </header>
 
@@ -1063,7 +1089,14 @@ export default function App() {
           <div>
             <div className="m3-home-grid">
               {/* Left Large Flat Pink Card (Быстрые настройки) */}
-              <div className="m3-hero-pink-card">
+              <div className="m3-hero-pink-card" style={{ position: 'relative', overflow: 'visible' }}>
+              <div style={{ position: 'absolute', right: '20px', top: '-38px', width: '95px', height: '95px', pointerEvents: 'none', zIndex: 10 }}>
+                <img 
+                  src={activeMascotId === 1 ? BOYKISSER_MASCOTS[0].src : activeMascot.src} 
+                  alt="Boykisser" 
+                  style={{ width: '100%', height: '100%', objectFit: 'contain', filter: 'drop-shadow(0 6px 14px rgba(0,0,0,0.35))' }} 
+                />
+              </div>
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.05rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#370014' }}>
@@ -2743,6 +2776,45 @@ export default function App() {
               >
                 <span className="material-symbols-rounded">close</span>
               </button>
+            </div>
+
+            {/* Boykisser Mascot Selector Grid */}
+            <div style={{ marginBottom: '22px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#ffb4c2', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span className="material-symbols-rounded">palette</span>
+                  <span>Маскот Станции (нажмите, чтобы выбрать)</span>
+                </div>
+                <span style={{ fontSize: '0.74rem', color: '#a49ea8', background: '#201e24', padding: '3px 8px', borderRadius: '8px' }}>5 стилей</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px' }}>
+                {BOYKISSER_MASCOTS.map(m => {
+                  const isActive = m.id === activeMascotId;
+                  return (
+                    <div 
+                      key={m.id}
+                      onClick={() => handleSelectMascot(m.id)}
+                      style={{ 
+                        background: isActive ? '#37202c' : '#1e1c22', 
+                        outline: isActive ? '2px solid #ffb4c2' : '1px solid rgba(255,255,255,0.06)', 
+                        borderRadius: '12px', 
+                        padding: '10px 6px', 
+                        display: 'flex', 
+                        flexDirection: 'column', 
+                        alignItems: 'center', 
+                        gap: '6px', 
+                        cursor: 'pointer', 
+                        transition: 'all 0.2s ease', 
+                        textAlign: 'center' 
+                      }}
+                    >
+                      <img src={m.src} alt={m.name} style={{ width: '48px', height: '48px', objectFit: 'contain', filter: 'drop-shadow(0 2px 5px rgba(0,0,0,0.4))' }} />
+                      <div style={{ fontSize: '0.75rem', fontWeight: 700, color: isActive ? '#ffb4c2' : '#f5edf2', lineHeight: 1.2 }}>{m.name}</div>
+                      <div style={{ fontSize: '0.65rem', color: '#a49ea8', lineHeight: 1.1 }}>{m.title}</div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.88rem' }}>
