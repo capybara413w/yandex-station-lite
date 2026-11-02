@@ -77,6 +77,35 @@
       opacity: 0.95;
     }
 
+    
+    /* Unobtrusive Boykisser Background Watermark in Empty Space */
+    .m3-bg-boykisser-watermark {
+      position: absolute;
+      bottom: -10px;
+      right: 25px;
+      width: min(380px, 32vw);
+      height: min(380px, 32vw);
+      object-fit: contain;
+      pointer-events: none;
+      user-select: none;
+      opacity: 0.13;
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.5));
+      z-index: 1;
+    }
+
+    .m3-nav-rail-watermark {
+      margin-top: auto;
+      margin-bottom: 24px;
+      width: 58px;
+      height: 58px;
+      object-fit: contain;
+      pointer-events: none;
+      user-select: none;
+      opacity: 0.12;
+      transition: opacity 0.3s ease;
+    }
+
     .m3-bg-blob-bottom-left {
       bottom: -120px;
       left: -40px;
@@ -629,13 +658,17 @@
     <svg class="m3-bg-blob m3-bg-blob-bottom-left" viewBox="0 0 650 550" fill="none">
       <path d="M140 60 C300 10, 510 60, 590 220 C670 380, 520 510, 350 520 C180 530, 30 440, 5 290 C-20 160, 50 90, 140 60 Z" fill="#211b2a" />
     </svg>
+    <!-- Background Boykisser Watermark in empty space -->
+    <img id="bgWatermark" class="m3-bg-boykisser-watermark" src="" alt="" aria-hidden="true" />
   </div>
 
   <div class="m3-app-layout">
     <!-- Left Navigation Rail -->
     <nav class="m3-nav-rail">
-      <div class="m3-avatar-scallop" onclick="openModal()" title="Маскот станции (нажмите для смены)">
-        <img id="activeMascotAvatar" src="" alt="Mascot" style="width: 54px; height: 54px; object-fit: contain; filter: drop-shadow(0 3px 8px rgba(0,0,0,0.5)); transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);" />
+      <div class="m3-avatar-scallop" onclick="openModal()" title="Furry station v0.1">
+        <svg viewBox="0 0 100 100" class="m3-avatar-scallop-svg">
+          <path d="M50 4 C58 4 62 10 68 12 C74 14 80 13 85 18 C90 23 89 29 93 35 C97 41 103 45 103 52 C103 59 97 63 93 69 C89 75 90 81 85 86 C80 91 74 90 68 92 C62 94 58 100 50 100 C42 100 38 94 32 92 C26 90 20 91 15 86 C10 81 11 75 7 69 C3 63 -3 59 -3 52 C-3 45 3 41 7 35 C11 29 10 23 15 18 C20 13 26 14 32 12 C38 10 42 4 50 4 Z" transform="translate(0, -2)" />
+        </svg>
       </div>
 
       <div class="m3-nav-rail-destinations">
@@ -681,6 +714,8 @@
           <span class="m3-nav-rail-label">settings</span>
         </button>
       </div>
+      <!-- Unused rail bottom space watermark -->
+      <img id="railWatermark" class="m3-nav-rail-watermark" src="" alt="" aria-hidden="true" />
     </nav>
 
     <!-- Main Content -->
@@ -693,10 +728,9 @@
           </div>
         </div>
 
-        <button type="button" class="m3-boykisser-chip" onclick="openModal()" title="Выбор маскота станции">
-          <img id="activeMascotChip" src="" style="width: 24px; height: 24px; object-fit: contain;" />
-          <span id="activeMascotName">boykisser</span>
-          <span class="material-symbols-rounded" style="font-size: 18px; color: #ffb4c2;">pets</span>
+        <button type="button" class="m3-boykisser-chip" onclick="openModal()" title="Информация о станции">
+          <span>boykisser</span>
+          <span class="material-symbols-rounded" style="font-size: 18px;">pets</span>
         </button>
       </header>
 
@@ -704,10 +738,7 @@
       <section id="tab-home" class="tab-content active">
         <div class="m3-home-grid">
           <!-- Left Quick Settings Pink Hero Card -->
-          <div class="m3-hero-pink-card" style="position: relative; overflow: visible;">
-            <div style="position: absolute; right: 20px; top: -38px; width: 95px; height: 95px; pointer-events: none; z-index: 10;">
-              <img id="homeHeroMascot" src="" alt="Boykisser" style="width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 6px 14px rgba(0,0,0,0.35));" />
-            </div>
+          <div class="m3-hero-pink-card">
             <div>
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
                 <div style="display: flex; align-items: center; gap: 8px; font-size: 1.05rem; font-weight: 800; text-transform: uppercase; color: #370014;">
@@ -900,9 +931,9 @@
           <!-- Main Hero Player -->
           <div class="m3-surface-card" style="background: #1d1b22;">
             <div style="display: flex; gap: 28px; align-items: center; flex-wrap: wrap;">
-              <div style="width: 140px; height: 140px; border-radius: 24px; background: #28252e; display: flex; align-items: center; justify-content: center; flex-direction: column; position: relative;">
-                <img id="musicMascot" src="" alt="DJ Boykisser" style="width: 86px; height: 86px; object-fit: contain; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.5));" />
-                <span style="font-size: 0.68rem; font-weight: 700; color: #78dc96; margin-top: 4px;" id="playerStateBadge">STOPPED</span>
+              <div style="width: 140px; height: 140px; border-radius: 24px; background: #28252e; display: flex; align-items: center; justify-content: center; flex-direction: column;">
+                <span class="material-symbols-rounded" style="font-size: 56px; color: #ffb4c2;" id="playerBigIcon">music_note</span>
+                <span style="font-size: 0.68rem; font-weight: 700; color: #78dc96; margin-top: 2px;" id="playerStateBadge">STOPPED</span>
               </div>
 
               <div style="flex: 1; min-width: 280px;">
@@ -1025,16 +1056,10 @@
         <div style="display: flex; flex-direction: column; gap: 20px;">
           <!-- System Prompt -->
           <div class="m3-surface-card">
-            <div class="m3-card-header" style="align-items: center;">
-              <div style="display: flex; align-items: center; gap: 14px;">
-                <img id="assistantMascot" src="" alt="Assistant Mascot" style="width: 48px; height: 48px; object-fit: contain; filter: drop-shadow(0 3px 8px rgba(0,0,0,0.4));" />
-                <div>
-                  <div class="m3-card-title" style="margin-bottom: 2px;">
-                    <span class="material-symbols-rounded" style="color: #ffb4c2;">psychology</span>
-                    <span>Системный промпт ассистента</span>
-                  </div>
-                  <div style="font-size: 0.78rem; color: #a49ea8; font-weight: 500;">Твой пушистый голосовой компаньон на Станции</div>
-                </div>
+            <div class="m3-card-header">
+              <div class="m3-card-title">
+                <span class="material-symbols-rounded" style="color: #ffb4c2;">psychology</span>
+                <span>Системный промпт ассистента</span>
               </div>
               <button type="button" class="m3-btn m3-btn-primary" onclick="saveConfigAll()">Сохранить промпт</button>
             </div>
@@ -1415,18 +1440,6 @@
           </button>
         </div>
 
-        <!-- Boykisser Mascot Selector -->
-        <div style="margin-bottom: 22px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <div style="font-size: 0.95rem; font-weight: 700; color: #ffb4c2; display: flex; align-items: center; gap: 8px;">
-              <span class="material-symbols-rounded">palette</span>
-              <span>Маскот Станции (нажмите, чтобы выбрать)</span>
-            </div>
-            <span style="font-size: 0.74rem; color: #a49ea8; background: #201e24; padding: 3px 8px; border-radius: 8px;">5 стилей</span>
-          </div>
-          <div id="mascotPickerGrid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;"></div>
-        </div>
-
         <div style="display: flex; flex-direction: column; gap: 10px; font-size: 0.88rem;">
           <div style="background: #17151a; padding: 12px 16px; border-radius: 12px; display: flex; justify-content: space-between;">
             <span style="color: #a49ea8;">Устройство:</span>
@@ -1459,7 +1472,7 @@
 
   <script>
 
-    // --- BOYKISSER MASCOT ENGINE ---
+    // --- BOYKISSER BACKGROUND WATERMARK CONTROLLER ---
     const BOYKISSER_MASCOTS = [
   {
     id: 1,
@@ -1493,69 +1506,31 @@
   }
 ];
 
-    let activeMascotId = parseInt(localStorage.getItem('active_boykisser_id') || '3');
+    const TAB_WATERMARKS = {
+      'home': BOYKISSER_MASCOTS[2].src,      // Chubby boykisser
+      'music': BOYKISSER_MASCOTS[3].src,     // Paw pixel-art boykisser
+      'assistant': BOYKISSER_MASCOTS[4].src, // Flustered boykisser
+      'led': BOYKISSER_MASCOTS[1].src,       // Happy >w< boykisser
+      'terminal': BOYKISSER_MASCOTS[0].src,  // Leash/held boykisser
+      'settings': BOYKISSER_MASCOTS[2].src   // Chubby boykisser
+    };
 
-    function setActiveMascot(id) {
-      activeMascotId = id;
-      localStorage.setItem('active_boykisser_id', id);
-      const mascot = BOYKISSER_MASCOTS.find(m => m.id === id) || BOYKISSER_MASCOTS[2];
-      
-      const avatarEl = document.getElementById('activeMascotAvatar');
-      if (avatarEl) {
-        avatarEl.src = mascot.src;
-        avatarEl.style.transform = 'scale(1.15) rotate(-6deg)';
-        setTimeout(() => { if (avatarEl) avatarEl.style.transform = 'scale(1) rotate(0deg)'; }, 250);
+    function updateWatermarks(tab) {
+      const bgImg = document.getElementById('bgWatermark');
+      const railImg = document.getElementById('railWatermark');
+      const targetSrc = TAB_WATERMARKS[tab] || BOYKISSER_MASCOTS[2].src;
+
+      if (bgImg) {
+        bgImg.style.opacity = '0';
+        setTimeout(() => {
+          bgImg.src = targetSrc;
+          bgImg.style.opacity = '0.13';
+        }, 150);
       }
-      
-      const chipEl = document.getElementById('activeMascotChip');
-      if (chipEl) chipEl.src = mascot.src;
-      
-      const nameEl = document.getElementById('activeMascotName');
-      if (nameEl) nameEl.innerText = mascot.name;
-
-      const heroEl = document.getElementById('homeHeroMascot');
-      if (heroEl) {
-        // Hero card gets mascot 1 (held by scruff) or active
-        const heroM = (id === 1 ? BOYKISSER_MASCOTS[0] : mascot);
-        heroEl.src = heroM.src;
+      if (railImg && !railImg.src) {
+        railImg.src = BOYKISSER_MASCOTS[2].src;
       }
-
-      const assistEl = document.getElementById('assistantMascot');
-      if (assistEl) assistEl.src = mascot.src;
-
-      const musicEl = document.getElementById('musicMascot');
-      if (musicEl) {
-        // DJ Mascot is mascot 4 (paw) or active
-        const musicM = BOYKISSER_MASCOTS.find(m => m.id === 4) || mascot;
-        musicEl.src = musicM.src;
-      }
-
-      renderMascotPicker();
     }
-
-    function renderMascotPicker() {
-      const grid = document.getElementById('mascotPickerGrid');
-      if (!grid) return;
-      grid.innerHTML = BOYKISSER_MASCOTS.map(m => {
-        const isActive = m.id === activeMascotId;
-        const bg = isActive ? '#37202c' : '#1e1c22';
-        const outline = isActive ? '2px solid #ffb4c2' : '1px solid rgba(255,255,255,0.06)';
-        return `
-          <div onclick="setActiveMascot(${m.id})" style="background: ${bg}; outline: ${outline}; border-radius: 12px; padding: 10px 6px; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; transition: all 0.2s ease; text-align: center;">
-            <img src="${m.src}" alt="${m.name}" style="width: 48px; height: 48px; object-fit: contain; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.4));" />
-            <div style="font-size: 0.75rem; font-weight: 700; color: ${isActive ? '#ffb4c2' : '#f5edf2'}; line-height: 1.2;">${m.name}</div>
-            <div style="font-size: 0.65rem; color: #a49ea8; line-height: 1.1;">${m.title}</div>
-          </div>
-        `;
-      }).join('');
-    }
-
-    // Initialize mascots on DOM load
-    document.addEventListener('DOMContentLoaded', () => {
-      setActiveMascot(activeMascotId);
-    });
-    // Also trigger immediately in case DOM is already loaded
-    setTimeout(() => setActiveMascot(activeMascotId), 50);
 
     let currentTab = 'home';
     let currentVolume = 70;
@@ -1564,6 +1539,7 @@
     let visActive = true;
 
     function switchTab(tab) {
+      updateWatermarks(tab);
       currentTab = tab;
       document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
       document.querySelectorAll('.m3-nav-rail-item').forEach(el => el.classList.remove('active'));
