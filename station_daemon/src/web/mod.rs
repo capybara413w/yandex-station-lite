@@ -1,5 +1,7 @@
-use crate::config::AppConfig;
-use crate::hardware::{AudioHardware, LedController, StationButtonEvent};
+use crate::config::{
+    AppConfig, AssistantConfigResponse, AssistantStageInfo, UpdateAssistantConfigPayload,
+};
+use crate::hardware::{AudioHardware, LedController, NetworkHardware, StationButtonEvent};
 use crate::services::{
     DeepSeekService, PlaybackState, PlayerService, SoundCloudService, SttService, TtsService,
     VisualizerService,
@@ -82,6 +84,7 @@ pub struct AppState {
     pub config: Arc<RwLock<AppConfig>>,
     pub audio: Arc<AudioHardware>,
     pub led: Arc<LedController>,
+    pub network: Arc<NetworkHardware>,
     pub deepseek: Arc<DeepSeekService>,
     pub player: Arc<PlayerService>,
     pub soundcloud: Arc<SoundCloudService>,
@@ -113,8 +116,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/player/action", post(player_action_handler))
         .route("/api/player/play_song", post(play_song_handler))
         .route("/api/player/seek", post(seek_handler))
-        // SoundCloud integration
-        .route("/api/soundcloud/search", get(soundcloud_search_handler))
+        // Music integration (YouTube Music, SoundCloud, Radio)
+        .route("/api/music/search", get(music_search_handler))
+        .route("/api/soundcloud/search", get(music_search_handler))
         .route("/api/soundcloud/play", post(soundcloud_play_handler))
         // Visualizer (3-Band Reactive Lightshow: Low, Mid, High)
         .route("/api/visualizer", get(get_visualizer_handler))
@@ -137,10 +141,43 @@ pub fn create_router(state: AppState) -> Router {
         .route("/ask", get(get_ask_handler))
         // Config management
         .route("/api/config", get(get_config_handler).post(post_config_handler))
+        .route(
+            "/api/config/assistant",
+            get(get_assistant_config_handler).post(post_assistant_config_handler),
+        )
         // Logs
         .route("/api/logs", get(get_logs_handler))
         .route("/api/logs/system", get(get_logs_handler))
         .route("/api/logs/system/clear", post(clear_logs_handler))
+        // Wi-Fi Management
+        .route("/api/wifi/status", get(get_wifi_status_handler))
+        .route("/api/wifi/scan", get(scan_wifi_handler).post(scan_wifi_handler))
+        .route("/api/wifi/connect", post(connect_wifi_handler))
+        .route("/api/wifi/restart", post(restart_wifi_handler))
+        // Wi-Fi 88x2cs Power Saving (/sys/module/88x2cs/parameters/)
+        .route(
+            "/api/wifi/powersave",
+            get(get_wifi_powersave_handler).post(set_wifi_powersave_handler),
+        )
+        .route(
+            "/api/wifi/powersave/optimize",
+            post(optimize_wifi_powersave_handler),
+        )
+        // Bluetooth Management
+        .route("/api/bluetooth/status", get(get_bluetooth_status_handler))
+        .route("/api/bluetooth/toggle", post(toggle_bluetooth_handler))
+        .route(
+            "/api/bluetooth/scan",
+            get(scan_bluetooth_handler).post(scan_bluetooth_handler),
+        )
+        .route("/api/bluetooth/connect", post(connect_bluetooth_handler))
+        .route(
+            "/api/bluetooth/disconnect",
+            post(disconnect_bluetooth_handler),
+        )
+        // Terminal command execution
+        .route("/api/terminal/run", post(terminal_run_handler))
+        .route("/api/command", post(terminal_run_handler))
         // Static assets fallback if /data/station_web exists
         .nest_service("/static", ServeDir::new(static_dir))
         .layer(CorsLayer::permissive())
@@ -148,15 +185,9 @@ pub fn create_router(state: AppState) -> Router {
 }
 
 /// Serves the web control panel:
-/// If /data/station_web/index.html exists, serves it; otherwise serves the rich embedded UI.
-async fn index_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let cfg = state.config.read().await;
-    let custom_index = Path::new(&cfg.server.web_static_dir).join("index.html");
-    if custom_index.exists() {
-        if let Ok(content) = tokio::fs::read_to_string(&custom_index).await {
-            return Html(content);
-        }
-    }
+/// The rich Material 3 web UI is compiled directly into the binary (EMBEDDED_HTML).
+/// This ensures binary updates on the station immediately reflect in the browser without stale disk cache.
+async fn index_handler(State(_state): State<AppState>) -> impl IntoResponse {
     Html(EMBEDDED_HTML.to_string())
 }
 
@@ -513,15 +544,17 @@ async fn play_song_handler(
 }
 
 #[derive(Deserialize)]
-struct SoundCloudSearchQuery {
+struct MusicSearchQuery {
     q: String,
+    #[serde(default)]
+    source: Option<String>,
     #[serde(default)]
     limit: Option<usize>,
 }
 
-async fn soundcloud_search_handler(
+async fn music_search_handler(
     State(state): State<AppState>,
-    Query(params): Query<SoundCloudSearchQuery>,
+    Query(params): Query<MusicSearchQuery>,
 ) -> impl IntoResponse {
     let q = params.q.trim();
     if q.is_empty() {
@@ -532,19 +565,26 @@ async fn soundcloud_search_handler(
             .into_response();
     }
 
-    let limit = params.limit.unwrap_or(10);
-    match state.soundcloud.search_tracks(q, limit).await {
+    let source = params.source.unwrap_or_else(|| "all".to_string());
+    let limit = params.limit.unwrap_or(12);
+    match state.soundcloud.search_multi_source(q, &source, limit).await {
         Ok(tracks) => Json(serde_json::json!({
             "success": true,
             "query": q,
+            "source": source,
             "results": tracks,
         }))
         .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e })),
-        )
-            .into_response(),
+        Err(e) => {
+            warn!("Music search for '{}' (source: {}) failed: {}", q, source, e);
+            Json(serde_json::json!({
+                "success": false,
+                "error": e,
+                "source": source,
+                "results": [],
+            }))
+            .into_response()
+        }
     }
 }
 
@@ -604,6 +644,36 @@ async fn soundcloud_play_handler(
     }
 
     let query = payload.song.unwrap_or_else(|| "Lofi chill beats".to_string());
+    if query.starts_with("http://") || query.starts_with("https://") {
+        state
+            .player
+            .play_direct_stream(
+                &query,
+                "Аудио поток",
+                "Прямая ссылка / Радио",
+                None,
+                0,
+                query.contains(".m3u8"),
+                0,
+                &state.led,
+            )
+            .await;
+        state
+            .logs
+            .push("INFO", &format!("Stream: запуск прямого потока '{}'", query))
+            .await;
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "success": true,
+                "track": "Аудио поток",
+                "artist": "Прямая ссылка",
+                "state": "playing"
+            })),
+        )
+            .into_response();
+    }
+
     state
         .player
         .play_soundcloud_or_query(&state.soundcloud, &query, &state.led)
@@ -959,6 +1029,421 @@ async fn get_config_handler(State(state): State<AppState>) -> impl IntoResponse 
     Json(cfg)
 }
 
+async fn get_assistant_config_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let cfg = state.config.read().await;
+
+    let llm_prov = cfg.deepseek.provider.trim().to_lowercase();
+    let (llm_key, llm_model, llm_account_id, llm_custom_url) = match llm_prov.as_str() {
+        "openrouter" => (
+            if !cfg.deepseek.openrouter_api_key.is_empty() {
+                cfg.deepseek.openrouter_api_key.as_str()
+            } else {
+                cfg.deepseek.api_key.as_str()
+            },
+            if !cfg.deepseek.openrouter_model.is_empty() {
+                cfg.deepseek.openrouter_model.clone()
+            } else {
+                cfg.deepseek.model.clone()
+            },
+            None,
+            None,
+        ),
+        "cloudflare" => (
+            if !cfg.deepseek.cloudflare_api_token.is_empty() {
+                cfg.deepseek.cloudflare_api_token.as_str()
+            } else {
+                cfg.deepseek.api_key.as_str()
+            },
+            cfg.deepseek.cloudflare_model.clone(),
+            Some(cfg.deepseek.cloudflare_account_id.clone()),
+            None,
+        ),
+        "custom" | "local" => (
+            cfg.deepseek.api_key.as_str(),
+            if !cfg.deepseek.custom_model.is_empty() {
+                cfg.deepseek.custom_model.clone()
+            } else {
+                cfg.deepseek.model.clone()
+            },
+            None,
+            Some(cfg.deepseek.custom_base_url.clone()),
+        ),
+        _ => (
+            cfg.deepseek.api_key.as_str(),
+            cfg.deepseek.model.clone(),
+            None,
+            None,
+        ),
+    };
+
+    let stt_prov = cfg.stt.provider.trim().to_lowercase();
+    let (stt_key, stt_model, stt_account_id, stt_custom_url) = match stt_prov.as_str() {
+        "openrouter" => (
+            if !cfg.stt.openrouter_api_key.is_empty() {
+                cfg.stt.openrouter_api_key.as_str()
+            } else {
+                cfg.stt.api_key.as_str()
+            },
+            cfg.stt.openrouter_model.clone(),
+            None,
+            None,
+        ),
+        "custom" | "local" => (
+            cfg.stt.api_key.as_str(),
+            cfg.stt.model.clone(),
+            None,
+            Some(cfg.stt.custom_url.clone()),
+        ),
+        _ => (
+            cfg.stt.api_key.as_str(),
+            cfg.stt.model.clone(),
+            Some(cfg.stt.account_id.clone()),
+            None,
+        ),
+    };
+
+    let tts_prov = cfg.tts.provider.trim().to_lowercase();
+    let (tts_key, tts_model, tts_voice, tts_account_id, tts_custom_url, tts_extra) = match tts_prov.as_str() {
+        "openrouter" => (
+            if !cfg.tts.openrouter.api_key.is_empty() {
+                cfg.tts.openrouter.api_key.as_str()
+            } else {
+                cfg.deepseek.openrouter_api_key.as_str()
+            },
+            cfg.tts.openrouter.model.clone(),
+            Some(cfg.tts.openrouter.voice.clone()),
+            None,
+            None,
+            cfg.tts.openrouter.extra_payload.clone().or_else(|| cfg.tts.extra_payload.clone()),
+        ),
+        "cloudflare" => (
+            if !cfg.tts.cloudflare.api_token.is_empty() {
+                cfg.tts.cloudflare.api_token.as_str()
+            } else {
+                cfg.stt.api_key.as_str()
+            },
+            cfg.tts.cloudflare.model.clone(),
+            Some(if !cfg.tts.cloudflare.voice_id.is_empty() {
+                cfg.tts.cloudflare.voice_id.clone()
+            } else {
+                "21m00Tcm4TlvDq8ikWAM".to_string()
+            }),
+            Some(if !cfg.tts.cloudflare.account_id.is_empty() {
+                cfg.tts.cloudflare.account_id.clone()
+            } else {
+                cfg.stt.account_id.clone()
+            }),
+            None,
+            cfg.tts.cloudflare.extra_payload.clone().or_else(|| cfg.tts.extra_payload.clone()),
+        ),
+        "custom" | "local" => (
+            "",
+            "local".to_string(),
+            None,
+            None,
+            Some(cfg.tts.custom.url.clone()),
+            cfg.tts.extra_payload.clone(),
+        ),
+        "openai" => (
+            cfg.tts.openai.api_key.as_str(),
+            cfg.tts.openai.model.clone(),
+            Some(cfg.tts.openai.voice.clone()),
+            None,
+            None,
+            cfg.tts.extra_payload.clone(),
+        ),
+        "elevenlabs" => (
+            cfg.tts.elevenlabs.api_key.as_str(),
+            cfg.tts.elevenlabs.model_id.clone(),
+            Some(cfg.tts.elevenlabs.voice_id.clone()),
+            None,
+            None,
+            cfg.tts.extra_payload.clone(),
+        ),
+        _ => (
+            "",
+            "google".to_string(),
+            None,
+            None,
+            None,
+            cfg.tts.extra_payload.clone(),
+        ),
+    };
+
+    let resp = AssistantConfigResponse {
+        llm: AssistantStageInfo {
+            provider: if llm_prov.is_empty() { "openrouter".to_string() } else { llm_prov },
+            model: llm_model,
+            has_key: !llm_key.is_empty(),
+            key_masked: mask_key(llm_key),
+            account_id: llm_account_id,
+            voice: None,
+            language: None,
+            endpoint_url: llm_custom_url,
+            extra_payload: cfg.deepseek.extra_payload.clone(),
+        },
+        stt: AssistantStageInfo {
+            provider: if stt_prov.is_empty() { "cloudflare".to_string() } else { stt_prov },
+            model: stt_model,
+            has_key: !stt_key.is_empty(),
+            key_masked: mask_key(stt_key),
+            account_id: stt_account_id,
+            voice: None,
+            language: Some(cfg.stt.language.clone()),
+            endpoint_url: stt_custom_url,
+            extra_payload: cfg.stt.extra_payload.clone(),
+        },
+        tts: AssistantStageInfo {
+            provider: if tts_prov.is_empty() { "google".to_string() } else { tts_prov },
+            model: tts_model,
+            has_key: !tts_key.is_empty(),
+            key_masked: mask_key(tts_key),
+            account_id: tts_account_id,
+            voice: tts_voice,
+            language: Some("ru".to_string()),
+            endpoint_url: tts_custom_url,
+            extra_payload: tts_extra,
+        },
+        system_prompt: cfg.deepseek.system_prompt.clone(),
+        temperature: cfg.deepseek.temperature,
+        max_tokens: cfg.deepseek.max_tokens,
+    };
+
+    (StatusCode::OK, Json(resp))
+}
+
+async fn post_assistant_config_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<UpdateAssistantConfigPayload>,
+) -> impl IntoResponse {
+    // 1. Validate extra_payload for all stages if present
+    if let Some(ref llm) = payload.llm {
+        if let Some(ref extra) = llm.extra_payload {
+            if !extra.is_object() && !extra.is_null() {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": "Invalid LLM extra_payload: must be a JSON object"
+                    })),
+                );
+            }
+        }
+    }
+    if let Some(ref stt) = payload.stt {
+        if let Some(ref extra) = stt.extra_payload {
+            if !extra.is_object() && !extra.is_null() {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": "Invalid STT extra_payload: must be a JSON object"
+                    })),
+                );
+            }
+        }
+    }
+    if let Some(ref tts) = payload.tts {
+        if let Some(ref extra) = tts.extra_payload {
+            if !extra.is_object() && !extra.is_null() {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": "Invalid TTS extra_payload: must be a JSON object"
+                    })),
+                );
+            }
+        }
+    }
+
+    // 2. Apply updates
+    let mut cfg = state.config.write().await;
+
+    // LLM stage
+    if let Some(ref llm) = payload.llm {
+        if let Some(ref prov) = llm.provider {
+            let p = prov.trim().to_lowercase();
+            if !p.is_empty() {
+                cfg.deepseek.provider = p;
+            }
+        }
+        if let Some(ref m) = llm.model {
+            let m_clean = m.trim();
+            if !m_clean.is_empty() {
+                match cfg.deepseek.provider.as_str() {
+                    "openrouter" => cfg.deepseek.openrouter_model = m_clean.to_string(),
+                    "cloudflare" => cfg.deepseek.cloudflare_model = m_clean.to_string(),
+                    "custom" | "local" => cfg.deepseek.custom_model = m_clean.to_string(),
+                    _ => cfg.deepseek.model = m_clean.to_string(),
+                }
+            }
+        }
+        if let Some(ref k) = llm.api_key {
+            let k_clean = k.trim();
+            if !k_clean.is_empty() && !k_clean.starts_with('*') {
+                match cfg.deepseek.provider.as_str() {
+                    "openrouter" => cfg.deepseek.openrouter_api_key = k_clean.to_string(),
+                    "cloudflare" => cfg.deepseek.cloudflare_api_token = k_clean.to_string(),
+                    _ => cfg.deepseek.api_key = k_clean.to_string(),
+                }
+            }
+        }
+        if let Some(ref acc) = llm.account_id {
+            if !acc.trim().is_empty() {
+                cfg.deepseek.cloudflare_account_id = acc.trim().to_string();
+            }
+        }
+        if let Some(ref url) = llm.endpoint_url {
+            cfg.deepseek.custom_base_url = url.trim().to_string();
+        }
+        if let Some(ref extra) = llm.extra_payload {
+            cfg.deepseek.extra_payload = if extra.is_null() { None } else { Some(extra.clone()) };
+        }
+    }
+
+    // STT stage
+    if let Some(ref stt) = payload.stt {
+        if let Some(ref prov) = stt.provider {
+            let p = prov.trim().to_lowercase();
+            if !p.is_empty() {
+                cfg.stt.provider = p;
+            }
+        }
+        if let Some(ref m) = stt.model {
+            let m_clean = m.trim();
+            if !m_clean.is_empty() {
+                if cfg.stt.provider == "openrouter" {
+                    cfg.stt.openrouter_model = m_clean.to_string();
+                } else {
+                    cfg.stt.model = m_clean.to_string();
+                }
+            }
+        }
+        if let Some(ref k) = stt.api_key {
+            let k_clean = k.trim();
+            if !k_clean.is_empty() && !k_clean.starts_with('*') {
+                if cfg.stt.provider == "openrouter" {
+                    cfg.stt.openrouter_api_key = k_clean.to_string();
+                } else {
+                    cfg.stt.api_key = k_clean.to_string();
+                }
+            }
+        }
+        if let Some(ref acc) = stt.account_id {
+            if !acc.trim().is_empty() {
+                cfg.stt.account_id = acc.trim().to_string();
+            }
+        }
+        if let Some(ref lang) = stt.language {
+            if !lang.trim().is_empty() {
+                cfg.stt.language = lang.trim().to_string();
+            }
+        }
+        if let Some(ref url) = stt.endpoint_url {
+            cfg.stt.custom_url = url.trim().to_string();
+        }
+        if let Some(ref extra) = stt.extra_payload {
+            cfg.stt.extra_payload = if extra.is_null() { None } else { Some(extra.clone()) };
+        }
+    }
+
+    // TTS stage
+    if let Some(ref tts) = payload.tts {
+        if let Some(ref prov) = tts.provider {
+            let p = prov.trim().to_lowercase();
+            if !p.is_empty() {
+                cfg.tts.provider = p;
+            }
+        }
+        if let Some(ref m) = tts.model {
+            let m_clean = m.trim();
+            if !m_clean.is_empty() {
+                match cfg.tts.provider.as_str() {
+                    "openrouter" => cfg.tts.openrouter.model = m_clean.to_string(),
+                    "cloudflare" => cfg.tts.cloudflare.model = m_clean.to_string(),
+                    "openai" => cfg.tts.openai.model = m_clean.to_string(),
+                    "elevenlabs" => cfg.tts.elevenlabs.model_id = m_clean.to_string(),
+                    "deepgram" => cfg.tts.deepgram.model = m_clean.to_string(),
+                    _ => {}
+                }
+            }
+        }
+        if let Some(ref v) = tts.voice {
+            let v_clean = v.trim();
+            if !v_clean.is_empty() {
+                match cfg.tts.provider.as_str() {
+                    "openrouter" => cfg.tts.openrouter.voice = v_clean.to_string(),
+                    "cloudflare" => cfg.tts.cloudflare.voice_id = v_clean.to_string(),
+                    "openai" => cfg.tts.openai.voice = v_clean.to_string(),
+                    "elevenlabs" => cfg.tts.elevenlabs.voice_id = v_clean.to_string(),
+                    _ => {}
+                }
+            }
+        }
+        if let Some(ref k) = tts.api_key {
+            let k_clean = k.trim();
+            if !k_clean.is_empty() && !k_clean.starts_with('*') {
+                match cfg.tts.provider.as_str() {
+                    "openrouter" => cfg.tts.openrouter.api_key = k_clean.to_string(),
+                    "cloudflare" => cfg.tts.cloudflare.api_token = k_clean.to_string(),
+                    "openai" => cfg.tts.openai.api_key = k_clean.to_string(),
+                    "elevenlabs" => cfg.tts.elevenlabs.api_key = k_clean.to_string(),
+                    _ => {}
+                }
+            }
+        }
+        if let Some(ref acc) = tts.account_id {
+            if !acc.trim().is_empty() {
+                cfg.tts.cloudflare.account_id = acc.trim().to_string();
+            }
+        }
+        if let Some(ref url) = tts.endpoint_url {
+            cfg.tts.custom.url = url.trim().to_string();
+        }
+        if let Some(ref extra) = tts.extra_payload {
+            let opt_extra = if extra.is_null() { None } else { Some(extra.clone()) };
+            cfg.tts.extra_payload = opt_extra.clone();
+            cfg.tts.openrouter.extra_payload = opt_extra.clone();
+            cfg.tts.cloudflare.extra_payload = opt_extra;
+        }
+    }
+
+    if let Some(ref sp) = payload.system_prompt {
+        cfg.deepseek.system_prompt = sp.clone();
+    }
+    if let Some(temp) = payload.temperature {
+        cfg.deepseek.temperature = temp;
+    }
+    if let Some(toks) = payload.max_tokens {
+        cfg.deepseek.max_tokens = toks;
+    }
+
+    // 3. Persist to disk
+    let save_path = if Path::new("/data").exists() {
+        "/data/config.json"
+    } else {
+        "config.json"
+    };
+
+    if let Ok(json_str) = serde_json::to_string_pretty(&*cfg) {
+        let _ = tokio::fs::write(save_path, json_str).await;
+        state
+            .logs
+            .push(
+                "INFO",
+                &format!("Assistant config saved to {} with extra_payload support", save_path),
+            )
+            .await;
+    }
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "success": true,
+            "status": "saved",
+            "path": save_path
+        })),
+    )
+}
+
 fn mask_key(k: &str) -> String {
     if k.len() > 8 {
         format!("{}...{}", &k[..4], &k[k.len() - 4..])
@@ -1080,7 +1565,37 @@ struct UpdateConfigRequest {
     #[serde(default)]
     proxy_enabled: Option<bool>,
     #[serde(default)]
+    socks5_enabled: Option<bool>,
+    #[serde(default)]
     proxy_socks5_url: Option<String>,
+    #[serde(default)]
+    socks5_url: Option<String>,
+    #[serde(default)]
+    cloudflare_llm_account_id: Option<String>,
+    #[serde(default)]
+    cloudflare_llm_api_token: Option<String>,
+    #[serde(default)]
+    cloudflare_llm_model: Option<String>,
+    #[serde(default)]
+    llm_extra_payload: Option<serde_json::Value>,
+    #[serde(default)]
+    openrouter_llm_extra_payload: Option<serde_json::Value>,
+    #[serde(default)]
+    cloudflare_llm_extra_payload: Option<serde_json::Value>,
+    #[serde(default)]
+    stt_extra_payload: Option<serde_json::Value>,
+    #[serde(default)]
+    cloudflare_stt_extra_payload: Option<serde_json::Value>,
+    #[serde(default)]
+    tts_extra_payload: Option<serde_json::Value>,
+    #[serde(default)]
+    openrouter_tts_extra_payload: Option<serde_json::Value>,
+    #[serde(default)]
+    cloudflare_tts_extra_payload: Option<serde_json::Value>,
+    #[serde(default)]
+    cloudflare_tts_voice_id: Option<String>,
+    #[serde(default)]
+    cloudflare_tts_lang: Option<String>,
 }
 
 async fn post_config_handler(
@@ -1088,6 +1603,44 @@ async fn post_config_handler(
     Json(payload): Json<UpdateConfigRequest>,
 ) -> impl IntoResponse {
     let mut cfg = state.config.write().await;
+
+    if let Some(acc) = payload.cloudflare_llm_account_id {
+        cfg.deepseek.cloudflare_account_id = acc.trim().to_string();
+    }
+    if let Some(tok) = payload.cloudflare_llm_api_token {
+        if !tok.trim().starts_with('*') {
+            cfg.deepseek.cloudflare_api_token = tok.trim().to_string();
+        }
+    }
+    if let Some(m) = payload.cloudflare_llm_model {
+        if !m.trim().is_empty() {
+            cfg.deepseek.cloudflare_model = m.trim().to_string();
+        }
+    }
+    if let Some(extra) = payload.cloudflare_llm_extra_payload.or(payload.openrouter_llm_extra_payload).or(payload.llm_extra_payload) {
+        cfg.deepseek.extra_payload = if extra.is_null() { None } else { Some(extra) };
+    }
+    if let Some(extra) = payload.cloudflare_stt_extra_payload.or(payload.stt_extra_payload) {
+        cfg.stt.extra_payload = if extra.is_null() { None } else { Some(extra) };
+    }
+    if let Some(extra) = payload.cloudflare_tts_extra_payload {
+        cfg.tts.cloudflare.extra_payload = if extra.is_null() { None } else { Some(extra) };
+    }
+    if let Some(extra) = payload.openrouter_tts_extra_payload.or(payload.tts_extra_payload) {
+        let opt = if extra.is_null() { None } else { Some(extra) };
+        cfg.tts.extra_payload = opt.clone();
+        cfg.tts.openrouter.extra_payload = opt;
+    }
+    if let Some(v) = payload.cloudflare_tts_voice_id {
+        if !v.trim().is_empty() {
+            cfg.tts.cloudflare.voice_id = v.trim().to_string();
+        }
+    }
+    if let Some(l) = payload.cloudflare_tts_lang {
+        if !l.trim().is_empty() {
+            cfg.tts.cloudflare.lang = l.trim().to_string();
+        }
+    }
 
     if let Some(prov) = payload.llm_provider {
         if !prov.trim().is_empty() {
@@ -1371,11 +1924,14 @@ async fn post_config_handler(
     if let Some(u) = payload.custom_tts_url {
         cfg.tts.custom.url = u.trim().to_string();
     }
-    if let Some(p_en) = payload.proxy_enabled {
+    if let Some(p_en) = payload.socks5_enabled.or(payload.proxy_enabled) {
         cfg.proxy.enabled = p_en;
     }
-    if let Some(p_url) = payload.proxy_socks5_url {
-        cfg.proxy.socks5_url = p_url.trim().to_string();
+    if let Some(p_url) = payload.socks5_url.or(payload.proxy_socks5_url) {
+        let trimmed = p_url.trim().to_string();
+        if !trimmed.is_empty() {
+            cfg.proxy.socks5_url = trimmed;
+        }
     }
 
     // Save to /data/config.json if path exists, otherwise config.json
@@ -1462,5 +2018,265 @@ fn get_current_time_str() -> String {
         format!("{:02}:{:02}:{:02}", hours, mins, s)
     } else {
         "00:00:00".to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Wi-Fi Web Handlers
+// ---------------------------------------------------------------------------
+
+async fn get_wifi_status_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let status = state.network.get_wifi_status();
+    Json(status)
+}
+
+async fn scan_wifi_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match state.network.scan_wifi() {
+        Ok(list) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "success": true, "networks": list })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": e, "networks": [] })),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct WifiConnectPayload {
+    ssid: String,
+    psk: Option<String>,
+}
+
+async fn connect_wifi_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<WifiConnectPayload>,
+) -> impl IntoResponse {
+    let psk = payload.psk.unwrap_or_default();
+    match state.network.connect_wifi(&payload.ssid, &psk) {
+        Ok(msg) => {
+            state.logs.push("INFO", &format!("Wi-Fi connection requested for SSID '{}'", payload.ssid)).await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "success": true, "message": msg })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+    }
+}
+
+async fn restart_wifi_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match state.network.restart_wifi() {
+        Ok(msg) => {
+            state.logs.push("INFO", "Wi-Fi restart initiated").await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "success": true, "message": msg })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Wi-Fi 88x2cs Power Saving Web Handlers
+// ---------------------------------------------------------------------------
+
+async fn get_wifi_powersave_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let cfg = state.network.get_powersave_config();
+    Json(cfg)
+}
+
+#[derive(Deserialize)]
+struct SetPowerSavePayload {
+    param: Option<String>,
+    name: Option<String>,
+    value: String,
+}
+
+async fn set_wifi_powersave_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<SetPowerSavePayload>,
+) -> impl IntoResponse {
+    let param_name = payload.param.or(payload.name).unwrap_or_default();
+    if param_name.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "success": false, "error": "Parameter name required" })),
+        );
+    }
+
+    match state.network.set_powersave_param(&param_name, &payload.value) {
+        Ok(()) => {
+            state.logs.push(
+                "INFO",
+                &format!("88x2cs parameter '{}' updated to '{}'", param_name, payload.value),
+            ).await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "success": true, "message": format!("Param '{}' set to '{}'", param_name, payload.value) })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+    }
+}
+
+async fn optimize_wifi_powersave_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match state.network.optimize_powersave() {
+        Ok(()) => {
+            state.logs.push(
+                "INFO",
+                "Wi-Fi 88x2cs power saving disabled (rtw_power_mgnt=0, rtw_ips_mode=0, rtw_smart_ps=0). Stable connection maintained.",
+            ).await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "success": true,
+                    "message": "Power saving disabled successfully (rtw_power_mgnt=0, rtw_ips_mode=0, rtw_smart_ps=0)"
+                })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bluetooth Web Handlers
+// ---------------------------------------------------------------------------
+
+async fn get_bluetooth_status_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let status = state.network.get_bluetooth_status();
+    Json(status)
+}
+
+#[derive(Deserialize)]
+struct BtTogglePayload {
+    powered: bool,
+}
+
+async fn toggle_bluetooth_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<BtTogglePayload>,
+) -> impl IntoResponse {
+    match state.network.toggle_bluetooth_power(payload.powered) {
+        Ok(()) => {
+            state.logs.push("INFO", &format!("Bluetooth power changed to {}", payload.powered)).await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "success": true, "powered": payload.powered })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+    }
+}
+
+async fn scan_bluetooth_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match state.network.scan_bluetooth() {
+        Ok(list) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "success": true, "devices": list })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": e, "devices": [] })),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct BtDeviceActionPayload {
+    address: String,
+}
+
+async fn connect_bluetooth_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<BtDeviceActionPayload>,
+) -> impl IntoResponse {
+    match state.network.connect_bluetooth(&payload.address) {
+        Ok(out) => {
+            state.logs.push("INFO", &format!("Connected to Bluetooth device {}", payload.address)).await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "success": true, "output": out })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+    }
+}
+
+async fn disconnect_bluetooth_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<BtDeviceActionPayload>,
+) -> impl IntoResponse {
+    match state.network.disconnect_bluetooth(&payload.address) {
+        Ok(out) => {
+            state.logs.push("INFO", &format!("Disconnected from Bluetooth device {}", payload.address)).await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "success": true, "output": out })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Terminal Command Execution Web Handler
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct TerminalRunPayload {
+    command: String,
+}
+
+async fn terminal_run_handler(
+    State(_state): State<AppState>,
+    Json(payload): Json<TerminalRunPayload>,
+) -> impl IntoResponse {
+    let out = std::process::Command::new("sh")
+        .args(["-c", &payload.command])
+        .output();
+
+    match out {
+        Ok(o) => {
+            let stdout = String::from_utf8_lossy(&o.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&o.stderr).to_string();
+            Json(serde_json::json!({
+                "success": o.status.success(),
+                "exit_code": o.status.code().unwrap_or(-1),
+                "stdout": stdout,
+                "stderr": stderr,
+                "output": if stdout.is_empty() { stderr } else { stdout },
+            }))
+        }
+        Err(e) => Json(serde_json::json!({
+            "success": false,
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": e.to_string(),
+            "output": format!("Execution error: {}", e),
+        })),
     }
 }

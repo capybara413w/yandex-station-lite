@@ -4,7 +4,9 @@ mod services;
 mod web;
 
 use config::AppConfig;
-use hardware::{AudioHardware, ButtonsListener, LedController, StationButtonEvent};
+use hardware::{
+    AudioHardware, ButtonsListener, LedController, NetworkHardware, StationButtonEvent,
+};
 use services::{
     DeepSeekService, PlayerService, SoundCloudService, SttService, TtsService, VisualizerService,
 };
@@ -51,6 +53,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let audio = Arc::new(AudioHardware::new(&initial_config.audio));
     let led = Arc::new(LedController::new(&initial_config.hardware));
     let buttons = ButtonsListener::new(&initial_config.hardware);
+    let network = Arc::new(NetworkHardware::new());
+
+    // Disable Wi-Fi power saving immediately so RTL8822CS never enters sleep mode
+    if let Err(e) = network.optimize_powersave() {
+        warn!("Could not optimize 88x2cs Wi-Fi power saving on startup: {}", e);
+    }
 
     // Initial hardware setup: apply default volume step and startup LED glow
     audio.set_volume(initial_config.audio.initial_volume);
@@ -62,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Initialize Core Native Services (Player, SoundCloud, STT, DeepSeek, Native TTS)
     let deepseek = Arc::new(DeepSeekService::new(config.clone(), &initial_config.proxy));
-    let soundcloud = Arc::new(SoundCloudService::new(&initial_config.proxy));
+    let soundcloud = Arc::new(SoundCloudService::new(config.clone()));
     let stt = Arc::new(SttService::new(
         initial_config.audio.record_device.clone(),
         initial_config.audio.sample_rate,
@@ -186,6 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config: config.clone(),
         audio: audio.clone(),
         led: led.clone(),
+        network: network.clone(),
         deepseek: deepseek.clone(),
         player: player.clone(),
         soundcloud: soundcloud.clone(),

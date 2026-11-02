@@ -5,18 +5,65 @@
     "web_static_dir": "/data/station_web"
   },
   "deepseek": {
+    "provider": "openrouter",
+    "openrouter_api_key": "YOUR_OPENROUTER_API_KEY_HERE",
+    "openrouter_model": "deepseek/deepseek-chat",
+    "cloudflare_account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID_HERE",
+    "cloudflare_api_token": "YOUR_CLOUDFLARE_API_TOKEN_HERE",
+    "cloudflare_model": "@cf/meta/llama-3.1-8b-instruct",
+    "custom_base_url": "http://127.0.0.1:11434/v1",
+    "custom_model": "llama3.2:1b",
     "api_key": "YOUR_DEEPSEEK_API_KEY_HERE",
     "model": "deepseek-chat",
     "temperature": 0.7,
     "max_tokens": 250,
-    "system_prompt": "Ты — умный голосовой ассистент смарт-колонки с поддержкой управления музыкой и светодиодной подсветкой. Отвечай кратко в 1-2 предложения строго валидным JSON: {\"text\": \"...\", \"color\": [R, G, B], \"action\": \"play\" | \"stop\" | \"resume\" | \"none\", \"song\": \"...\"}."
+    "system_prompt": "Ты — умный голосовой ассистент смарт-колонки с поддержкой управления музыкой и светодиодной подсветкой. Отвечай кратко в 1-2 предложения строго валидным JSON: {\"text\": \"...\", \"color\": [R, G, B], \"action\": \"play\" | \"stop\" | \"resume\" | \"none\", \"song\": \"...\"}.",
+    "extra_payload": {
+      "top_p": 0.9,
+      "presence_penalty": 0.1,
+      "repetition_penalty": 1.05
+    }
   },
   "stt": {
     "provider": "cloudflare",
     "account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID_HERE",
     "api_key": "YOUR_CLOUDFLARE_API_KEY_HERE",
     "model": "@cf/openai/whisper",
-    "language": "ru"
+    "language": "ru",
+    "openrouter_api_key": "YOUR_OPENROUTER_API_KEY_HERE",
+    "openrouter_model": "openai/whisper",
+    "custom_url": "http://127.0.0.1:8080/v1/audio/transcriptions",
+    "extra_payload": {
+      "temperature": 0.0,
+      "response_format": "json"
+    }
+  },
+  "tts": {
+    "provider": "cloudflare",
+    "openrouter": {
+      "api_key": "YOUR_OPENROUTER_API_KEY_HERE",
+      "model": "openai/tts-1",
+      "voice": "alloy",
+      "extra_payload": {
+        "speed": 1.05
+      }
+    },
+    "cloudflare": {
+      "account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID_HERE",
+      "api_token": "YOUR_CLOUDFLARE_API_TOKEN_HERE",
+      "model": "@cf/myshell/melotts-v1",
+      "extra_payload": {
+        "voice_id": "ru-female-1",
+        "speed": 1.0
+      }
+    },
+    "custom": {
+      "url": "http://127.0.0.1:5002/api/tts"
+    },
+    "extra_payload": {
+      "voice_id": "ru-female-1",
+      "sample_rate": 24000
+    }
   },
   "proxy": {
     "enabled": false,

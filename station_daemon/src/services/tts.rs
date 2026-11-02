@@ -3,6 +3,10 @@ use crate::config::{
     OpenAiTtsConfig, OpenRouterTtsConfig, ProxyConfig,
 };
 use crate::hardware::LedController;
+use crate::services::clients::{
+    BoxFuture, CloudflareTtsClient, GoogleTtsClient, LocalTtsClient, OpenRouterTtsClient,
+    TtsClient,
+};
 use reqwest::Client;
 use std::fs;
 use std::path::Path;
@@ -150,8 +154,12 @@ impl TtsService {
             return Err("Cloudflare Account ID or API Token is empty".to_string());
         }
 
-        let model_name = if model.trim().is_empty() {
-            "@cf/myshell/melotts-v1"
+        let model_name = if model.trim().is_empty()
+            || model.trim().contains("elevenlabs")
+            || model.trim() == "@cf/myshell/melotts-v1"
+            || model.trim() == "@cf/myshell/melotts"
+        {
+            "@cf/myshell-ai/melotts"
         } else {
             model.trim()
         };
@@ -160,25 +168,11 @@ impl TtsService {
             "https://api.cloudflare.com/client/v4/accounts/{}/ai/run/{}",
             acc_id, model_name
         );
-        let payload = if model_name.contains("elevenlabs") {
-            serde_json::json!({
-                "prompt": text,
-                "text": text,
-                "model_id": if model_name.contains("flash") {
-                    "eleven_flash_v2_5"
-                } else if model_name.contains("turbo") {
-                    "eleven_turbo_v2_5"
-                } else {
-                    "eleven_multilingual_v2"
-                }
-            })
-        } else {
-            serde_json::json!({
-                "prompt": text,
-                "text": text,
-                "language": "ru"
-            })
-        };
+        let payload = serde_json::json!({
+            "prompt": text,
+            "text": text,
+            "lang": "ru"
+        });
 
         info!("Calling Cloudflare TTS [{}] for account {}...", model_name, acc_id);
         let res = self
@@ -468,11 +462,16 @@ impl TtsService {
         };
 
         let url = "https://openrouter.ai/api/v1/audio/speech";
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "model": model,
             "input": text,
             "voice": voice,
+            "response_format": "mp3"
         });
+        if !voice.is_empty() && !voice.eq_ignore_ascii_case("alloy") {
+            payload["voice_id"] = serde_json::Value::String(voice.to_string());
+        }
+        crate::config::merge_extra_payload(&mut payload, openrouter_cfg.extra_payload.as_ref());
 
         info!("Calling OpenRouter TTS [model: {}, voice: {}]...", model, voice);
         let res = self
@@ -501,19 +500,27 @@ impl TtsService {
         Ok(bytes.to_vec())
     }
 
-    /// Synthesizes speech via configured TTS provider (Google, ElevenLabs, Cloudflare, OpenAI, OpenRouter, Deepgram, Cartesia, Custom),
-    /// animates LED ring, and plays via mpg123.
-    pub async fn speak(&self, text: &str, color: [u8; 3], led: &LedController) -> Result<(), String> {
+    /// Synthesizes speech to raw audio bytes (MP3/WAV) using the active provider with extra_payload merging.
+    pub async fn synthesize_audio(&self, text: &str) -> Result<Vec<u8>, String> {
         let clean_text = text.trim();
         if clean_text.is_empty() {
-            return Ok(());
+            return Err("Empty text for speech synthesis".to_string());
         }
 
-        // 1. Stop any previous speech
-        self.stop(led);
-
-        // 2. Fetch TTS config
-        let (provider, openrouter_cfg, eleven_cfg, cf_cfg, cf_stt_acc, cf_stt_token, openai_cfg, deepgram_cfg, cartesia_cfg, custom_cfg, deepseek_or_key) = {
+        let (
+            provider,
+            openrouter_cfg,
+            eleven_cfg,
+            cf_cfg,
+            cf_stt_acc,
+            cf_stt_token,
+            openai_cfg,
+            deepgram_cfg,
+            cartesia_cfg,
+            custom_cfg,
+            deepseek_or_key,
+            tts_extra_payload,
+        ) = {
             let cfg = self.config.read().await;
             (
                 cfg.tts.provider.to_lowercase(),
@@ -527,88 +534,120 @@ impl TtsService {
                 cfg.tts.cartesia.clone(),
                 cfg.tts.custom.clone(),
                 cfg.deepseek.openrouter_api_key.clone(),
+                cfg.tts.extra_payload.clone(),
             )
         };
 
-        // 3. Synthesize audio data
-        let audio_data = match provider.as_str() {
+        match provider.as_str() {
             "openrouter" => {
-                match self.synthesize_openrouter(clean_text, &openrouter_cfg, &deepseek_or_key).await {
-                    Ok(data) => data,
+                let key = if !openrouter_cfg.api_key.trim().is_empty() {
+                    openrouter_cfg.api_key.clone()
+                } else {
+                    deepseek_or_key.clone()
+                };
+                let extra = openrouter_cfg.extra_payload.clone().or(tts_extra_payload);
+                let client = OpenRouterTtsClient::new(
+                    self.client.clone(),
+                    key,
+                    openrouter_cfg.model.clone(),
+                    openrouter_cfg.voice.clone(),
+                    extra,
+                );
+                match client.synthesize(clean_text).await {
+                    Ok(data) => Ok(data),
                     Err(e) => {
                         warn!("OpenRouter TTS failed: {}. Falling back to Google TTS.", e);
-                        self.synthesize_google(clean_text).await?
-                    }
-                }
-            }
-            "elevenlabs" => {
-                match self.synthesize_elevenlabs(clean_text, &eleven_cfg).await {
-                    Ok(data) => data,
-                    Err(e) => {
-                        warn!("ElevenLabs failed: {}. Falling back to Google TTS.", e);
-                        self.synthesize_google(clean_text).await?
+                        self.synthesize_google(clean_text).await
                     }
                 }
             }
             "cloudflare" => {
                 let acc = if !cf_cfg.account_id.trim().is_empty() {
-                    cf_cfg.account_id.trim()
+                    cf_cfg.account_id.clone()
                 } else {
-                    cf_stt_acc.trim()
+                    cf_stt_acc.clone()
                 };
                 let tok = if !cf_cfg.api_token.trim().is_empty() {
-                    cf_cfg.api_token.trim()
+                    cf_cfg.api_token.clone()
                 } else {
-                    cf_stt_token.trim()
+                    cf_stt_token.clone()
                 };
-                match self.synthesize_cloudflare(clean_text, acc, tok, &cf_cfg.model).await {
-                    Ok(data) => data,
+                let extra = cf_cfg.extra_payload.clone().or(tts_extra_payload);
+                let client = CloudflareTtsClient::new(
+                    self.client.clone(),
+                    acc,
+                    tok,
+                    cf_cfg.model.clone(),
+                    cf_cfg.voice_id.clone(),
+                    cf_cfg.lang.clone(),
+                    extra,
+                );
+                match client.synthesize(clean_text).await {
+                    Ok(data) => Ok(data),
                     Err(e) => {
                         warn!("Cloudflare TTS failed: {}. Falling back to Google TTS.", e);
-                        self.synthesize_google(clean_text).await?
+                        self.synthesize_google(clean_text).await
                     }
                 }
             }
-            "openai" => {
-                match self.synthesize_openai(clean_text, &openai_cfg).await {
-                    Ok(data) => data,
-                    Err(e) => {
-                        warn!("OpenAI TTS failed: {}. Falling back to Google TTS.", e);
-                        self.synthesize_google(clean_text).await?
-                    }
-                }
-            }
-            "deepgram" => {
-                match self.synthesize_deepgram(clean_text, &deepgram_cfg).await {
-                    Ok(data) => data,
-                    Err(e) => {
-                        warn!("Deepgram TTS failed: {}. Falling back to Google TTS.", e);
-                        self.synthesize_google(clean_text).await?
-                    }
-                }
-            }
-            "cartesia" => {
-                match self.synthesize_cartesia(clean_text, &cartesia_cfg).await {
-                    Ok(data) => data,
-                    Err(e) => {
-                        warn!("Cartesia TTS failed: {}. Falling back to Google TTS.", e);
-                        self.synthesize_google(clean_text).await?
-                    }
-                }
-            }
-            "custom" => {
-                match self.synthesize_custom(clean_text, &custom_cfg).await {
-                    Ok(data) => data,
+            "custom" | "local" => {
+                let extra = tts_extra_payload;
+                let client = LocalTtsClient::new(self.client.clone(), custom_cfg.url.clone(), extra);
+                match client.synthesize(clean_text).await {
+                    Ok(data) => Ok(data),
                     Err(e) => {
                         warn!("Custom TTS failed: {}. Falling back to Google TTS.", e);
-                        self.synthesize_google(clean_text).await?
+                        self.synthesize_google(clean_text).await
                     }
                 }
             }
-            _ => self.synthesize_google(clean_text).await?,
-        };
+            "elevenlabs" => match self.synthesize_elevenlabs(clean_text, &eleven_cfg).await {
+                Ok(data) => Ok(data),
+                Err(e) => {
+                    warn!("ElevenLabs failed: {}. Falling back to Google TTS.", e);
+                    self.synthesize_google(clean_text).await
+                }
+            },
+            "openai" => match self.synthesize_openai(clean_text, &openai_cfg).await {
+                Ok(data) => Ok(data),
+                Err(e) => {
+                    warn!("OpenAI TTS failed: {}. Falling back to Google TTS.", e);
+                    self.synthesize_google(clean_text).await
+                }
+            },
+            "deepgram" => match self.synthesize_deepgram(clean_text, &deepgram_cfg).await {
+                Ok(data) => Ok(data),
+                Err(e) => {
+                    warn!("Deepgram TTS failed: {}. Falling back to Google TTS.", e);
+                    self.synthesize_google(clean_text).await
+                }
+            },
+            "cartesia" => match self.synthesize_cartesia(clean_text, &cartesia_cfg).await {
+                Ok(data) => Ok(data),
+                Err(e) => {
+                    warn!("Cartesia TTS failed: {}. Falling back to Google TTS.", e);
+                    self.synthesize_google(clean_text).await
+                }
+            },
+            _ => self.synthesize_google(clean_text).await,
+        }
+    }
 
-        // 4. Save to /tmp/tts.mp3
+    /// Synthesizes speech via configured TTS provider (Google, ElevenLabs, Cloudflare, OpenAI, OpenRouter, Deepgram, Cartesia, Custom),
+    /// animates LED ring, and plays via mpg123.
+    pub async fn speak(&self, text: &str, color: [u8; 3], led: &LedController) -> Result<(), String> {
+        let clean_text = text.trim();
+        if clean_text.is_empty() {
+            return Ok(());
+        }
+
+        // 1. Stop any previous speech
+        self.stop(led);
+
+        // 2. Synthesize audio data
+        let audio_data = self.synthesize_audio(clean_text).await?;
+
+        // 3. Save to /tmp/tts.mp3
         let tts_file = "/tmp/tts.mp3";
         if let Err(e) = fs::write(tts_file, &audio_data) {
             error!("Failed to write /tmp/tts.mp3: {}", e);
@@ -772,3 +811,13 @@ fn split_text_into_chunks(text: &str, max_len: usize) -> Vec<String> {
 
     chunks
 }
+
+impl TtsClient for TtsService {
+    fn synthesize<'a>(
+        &'a self,
+        text: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<u8>, String>> {
+        Box::pin(async move { self.synthesize_audio(text).await })
+    }
+}
+

@@ -1,4 +1,7 @@
-use crate::config::{AppConfig, ProxyConfig};
+use crate::config::{merge_extra_payload, AppConfig, ProxyConfig};
+use crate::services::clients::{
+    BoxFuture, CloudflareLlmClient, LlmClient, LocalLlmClient, OpenRouterLlmClient,
+};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -38,14 +41,28 @@ impl DeepSeekService {
         Self { config, client }
     }
 
-    /// Queries active LLM provider (OpenRouter, Groq, OpenAI, Mistral, DeepSeek, or Custom) chat completions API.
+    /// Queries active LLM provider (OpenRouter, Cloudflare, Groq, OpenAI, Mistral, Anthropic, Gemini, DeepSeek, or Custom) chat completions API.
     pub async fn query(&self, prompt: &str) -> Result<DeepSeekResponse, String> {
-        let (provider, api_key, model, system_prompt, temperature, max_tokens, custom_url) = {
+        let (
+            provider,
+            api_key,
+            model,
+            system_prompt,
+            temperature,
+            max_tokens,
+            custom_url,
+            cf_account_id,
+            cf_api_token,
+            cf_model,
+            extra_payload,
+        ) = {
             let cfg = self.config.read().await;
             let prov = cfg.deepseek.provider.trim().to_lowercase();
             let p = if prov.is_empty() {
                 if !cfg.deepseek.openrouter_api_key.is_empty() {
                     "openrouter".to_string()
+                } else if !cfg.deepseek.cloudflare_api_token.is_empty() {
+                    "cloudflare".to_string()
                 } else if !cfg.deepseek.api_key.is_empty() {
                     "deepseek".to_string()
                 } else {
@@ -66,6 +83,18 @@ impl DeepSeekService {
                         cfg.deepseek.openrouter_model.clone()
                     } else {
                         "deepseek/deepseek-chat".to_string()
+                    },
+                ),
+                "cloudflare" => (
+                    if !cfg.deepseek.cloudflare_api_token.is_empty() {
+                        cfg.deepseek.cloudflare_api_token.clone()
+                    } else {
+                        cfg.deepseek.api_key.clone()
+                    },
+                    if !cfg.deepseek.cloudflare_model.is_empty() {
+                        cfg.deepseek.cloudflare_model.clone()
+                    } else {
+                        "@cf/meta/llama-3.1-8b-instruct".to_string()
                     },
                 ),
                 "groq" => (
@@ -136,7 +165,7 @@ impl DeepSeekService {
                         "meta-llama/Llama-3.3-70B-Instruct-Turbo".to_string()
                     },
                 ),
-                "custom" => (
+                "custom" | "local" => (
                     cfg.deepseek.api_key.clone(),
                     if !cfg.deepseek.custom_model.is_empty() {
                         cfg.deepseek.custom_model.clone()
@@ -155,16 +184,66 @@ impl DeepSeekService {
                 cfg.deepseek.temperature,
                 cfg.deepseek.max_tokens,
                 cfg.deepseek.custom_base_url.clone(),
+                cfg.deepseek.cloudflare_account_id.clone(),
+                cfg.deepseek.cloudflare_api_token.clone(),
+                cfg.deepseek.cloudflare_model.clone(),
+                cfg.deepseek.extra_payload.clone(),
             )
         };
 
-        if api_key.is_empty() && provider != "custom" {
+        // 1. Direct dispatch to dedicated LlmClient implementations
+        if provider == "openrouter" {
+            let client = OpenRouterLlmClient::new(
+                self.client.clone(),
+                api_key,
+                model,
+                temperature,
+                max_tokens,
+                extra_payload,
+            );
+            return client.query(prompt, &system_prompt).await;
+        }
+
+        if provider == "cloudflare" {
+            let token = if !cf_api_token.is_empty() {
+                cf_api_token
+            } else {
+                api_key
+            };
+            let model_name = if !cf_model.is_empty() {
+                cf_model
+            } else {
+                model
+            };
+            let client = CloudflareLlmClient::new(
+                self.client.clone(),
+                cf_account_id,
+                token,
+                model_name,
+                extra_payload,
+            );
+            return client.query(prompt, &system_prompt).await;
+        }
+
+        if provider == "custom" || provider == "local" {
+            let client = LocalLlmClient::new(
+                self.client.clone(),
+                custom_url,
+                api_key,
+                model,
+                temperature,
+                max_tokens,
+                extra_payload,
+            );
+            return client.query(prompt, &system_prompt).await;
+        }
+
+        if api_key.is_empty() {
             info!("No API key for provider '{}', using local fallback", provider);
             return Ok(self.fallback_response(prompt));
         }
 
         let endpoint_url = match provider.as_str() {
-            "openrouter" => "https://openrouter.ai/api/v1/chat/completions".to_string(),
             "groq" => "https://api.groq.com/openai/v1/chat/completions".to_string(),
             "openai" => "https://api.openai.com/v1/chat/completions".to_string(),
             "mistral" => "https://api.mistral.ai/v1/chat/completions".to_string(),
@@ -172,23 +251,27 @@ impl DeepSeekService {
             "perplexity" => "https://api.perplexity.ai/chat/completions".to_string(),
             "together" => "https://api.together.xyz/v1/chat/completions".to_string(),
             "anthropic" => "https://api.anthropic.com/v1/messages".to_string(),
-            "custom" => {
-                let base = custom_url.trim().trim_end_matches('/');
-                if base.is_empty() {
-                    "http://localhost:11434/v1/chat/completions".to_string()
-                } else if base.ends_with("/chat/completions") {
-                    base.to_string()
-                } else {
-                    format!("{}/chat/completions", base)
-                }
-            }
             _ => "https://api.deepseek.com/chat/completions".to_string(),
         };
 
-        let body = if provider == "anthropic" {
+        let effective_system_prompt = if system_prompt.to_lowercase().contains("json") {
+            system_prompt.clone()
+        } else {
+            let base = if system_prompt.trim().is_empty() {
+                "Ты — умный голосовой ассистент смарт-колонки с поддержкой управления музыкой и светодиодной подсветкой.".to_string()
+            } else {
+                system_prompt.clone()
+            };
+            format!(
+                "{}\n\nВАЖНО: Отвечай строго валидным JSON объектом (JSON format): {{\"text\": \"...\", \"color\": [R, G, B], \"action\": \"play\" | \"stop\" | \"resume\" | \"none\", \"song\": \"...\"}}",
+                base
+            )
+        };
+
+        let mut body = if provider == "anthropic" {
             serde_json::json!({
                 "model": model,
-                "system": system_prompt,
+                "system": &effective_system_prompt,
                 "messages": [
                     { "role": "user", "content": prompt }
                 ],
@@ -199,7 +282,7 @@ impl DeepSeekService {
             let mut b = serde_json::json!({
                 "model": model,
                 "messages": [
-                    { "role": "system", "content": system_prompt },
+                    { "role": "system", "content": &effective_system_prompt },
                     { "role": "user", "content": prompt }
                 ],
                 "temperature": temperature,
@@ -211,6 +294,9 @@ impl DeepSeekService {
             }
             b
         };
+
+        // Merge extra_payload into body
+        merge_extra_payload(&mut body, extra_payload.as_ref());
 
         let mut req = self
             .client
@@ -225,12 +311,6 @@ impl DeepSeekService {
             req = req.header("Authorization", format!("Bearer {}", api_key));
         }
 
-        if provider == "openrouter" {
-            req = req
-                .header("HTTP-Referer", "https://yandex-station-lite.local")
-                .header("X-Title", "Yandex Station Lite");
-        }
-
         info!("Calling LLM [{}] via {} (model: {})...", provider, endpoint_url, model);
         let res = req
             .json(&body)
@@ -242,6 +322,35 @@ impl DeepSeekService {
             let status = res.status();
             let err_txt = res.text().await.unwrap_or_default();
             error!("LLM [{}] error HTTP {}: {}", provider, status, err_txt);
+
+            // Automatic fallback: if provider rejected response_format or demanded 'json' in prompt, retry once without response_format
+            if status.as_u16() == 400 && (err_txt.contains("response_format") || err_txt.contains("json") || err_txt.contains("JSON")) {
+                warn!("LLM [{}] rejected response_format, retrying without response_format...", provider);
+                if let Some(obj) = body.as_object_mut() {
+                    obj.remove("response_format");
+                }
+                let mut retry_req = self.client.post(&endpoint_url).header("Content-Type", "application/json");
+                if provider == "anthropic" {
+                    retry_req = retry_req.header("x-api-key", &api_key).header("anthropic-version", "2023-06-01");
+                } else if !api_key.is_empty() {
+                    retry_req = retry_req.header("Authorization", format!("Bearer {}", api_key));
+                }
+
+                if let Ok(retry_res) = retry_req.json(&body).send().await {
+                    if retry_res.status().is_success() {
+                        if let Ok(val) = retry_res.json::<serde_json::Value>().await {
+                            let content = if provider == "anthropic" {
+                                val["content"][0]["text"].as_str().unwrap_or("{}")
+                            } else {
+                                val["choices"][0]["message"]["content"].as_str().unwrap_or("{}")
+                            };
+                            info!("LLM [{}] raw content (retry without response_format): {}", provider, content);
+                            return Ok(self.parse_json_or_fallback(content, prompt));
+                        }
+                    }
+                }
+            }
+
             return Err(format!("{} returned {}: {}", provider, status, err_txt));
         }
 
@@ -257,12 +366,9 @@ impl DeepSeekService {
                 .as_str()
                 .unwrap_or("{}")
         };
-
         info!("LLM [{}] raw content: {}", provider, content);
         Ok(self.parse_json_or_fallback(content, prompt))
     }
-
-
 
     fn parse_json_or_fallback(&self, content: &str, prompt: &str) -> DeepSeekResponse {
         let cleaned = content
@@ -354,3 +460,14 @@ impl DeepSeekService {
         }
     }
 }
+
+impl LlmClient for DeepSeekService {
+    fn query<'a>(
+        &'a self,
+        prompt: &'a str,
+        _system_prompt: &'a str,
+    ) -> BoxFuture<'a, Result<DeepSeekResponse, String>> {
+        Box::pin(async move { self.query(prompt).await })
+    }
+}
+

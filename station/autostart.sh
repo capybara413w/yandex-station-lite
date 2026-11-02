@@ -48,3 +48,15 @@ fi
 
 # 5. Градиентная индикация запуска
 gradient_boot &
+
+# 6. Автозапуск автономного демона station_daemon
+if [ -x "/data/station_daemon" ] && ! ps | grep -v grep | grep -q "station_daemon"; then
+    if [ -x "/data/run_daemon.sh" ]; then
+        start-stop-daemon -S -b -x /data/run_daemon.sh -m -p /tmp/station_daemon.pid -- 2>/dev/null || \
+        (/data/run_daemon.sh &)
+    else
+        start-stop-daemon -S -b -x /data/station_daemon -m -p /tmp/station_daemon.pid -- 2>/dev/null || \
+        (/data/station_daemon </dev/null >/tmp/station_daemon.log 2>&1 &)
+    fi
+fi
+

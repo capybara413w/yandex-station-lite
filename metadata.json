@@ -1,8 +1,6 @@
 {
-  "name": "Yandex Station Lite Control Center",
-  "description": "SoundCloud Streaming, DeepSeek LLM assistant, and ADB audio/LED control center for Yandex Station Lite",
+  "name": "yandex-station-lite",
+  "description": "Автономный Rust-демон (station_daemon) и веб-центр управления для Яндекс Станции Лайт v1: Wi-Fi, Bluetooth, энергосбережение 88x2cs, LLM (DeepSeek/Cloudflare/OpenRouter), STT, TTS, TAS5805M DAC и LED",
   "permissions": [],
-  "capabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
+  "capabilities": []
 }

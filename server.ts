@@ -138,6 +138,12 @@ const DEFAULT_CONFIG = {
   cartesia_tts_model_id: 'sonic-multilingual',
   cartesia_tts_voice_id: 'a0e998e3-182d-4f0d-9fb9-e82429f3303a',
   custom_tts_url: '',
+  cloudflare_llm_account_id: '',
+  cloudflare_llm_api_token: '',
+  cloudflare_llm_model: '@cf/meta/llama-3.1-8b-instruct',
+  llm_extra_payload: null as any,
+  stt_extra_payload: null as any,
+  tts_extra_payload: null as any,
 };
 
 let CONFIG = { ...DEFAULT_CONFIG };
@@ -305,9 +311,11 @@ function runStationAdbCommand(cmd: string): Promise<{ ok: boolean; out: string }
     const targetIp = CONFIG.station_ip?.trim() || LAST_STATION_IP;
     const targetAddr = targetIp ? (targetIp.includes(':') ? targetIp : `${targetIp}:5555`) : '';
     const devArgs = targetAddr ? `-s ${targetAddr} ` : '';
-    const fullCmd = `adb ${devArgs}shell "export PATH=\\$PATH:/opt/bin:/data; ${cmd}"`;
+    const adbBinPath = path.join(__dirname, 'tools', 'adb.exe');
+    const adbCmd = fs.existsSync(adbBinPath) ? `"${adbBinPath}"` : 'adb';
+    const fullCmd = `${adbCmd} ${devArgs}shell "export PATH=\\$PATH:/opt/bin:/data; ${cmd}"`;
 
-    exec(fullCmd, { timeout: 3500 }, (error, stdout, stderr) => {
+    exec(fullCmd, { timeout: 4500 }, (error, stdout, stderr) => {
       if (error) {
         resolve({ ok: false, out: stderr || error.message });
       } else {
@@ -432,6 +440,11 @@ async function callDeepSeek(prompt: string): Promise<{ data: any | null; error: 
     apiKey = (CONFIG.together_api_key || '').trim();
     modelName = CONFIG.together_model || 'meta-llama/Llama-3.3-70B-Instruct-Turbo';
     url = 'https://api.together.xyz/v1/chat/completions';
+  } else if (provider === 'cloudflare') {
+    apiKey = (CONFIG.cloudflare_llm_api_token || CONFIG.cloudflare_api_key || '').trim();
+    const acc = (CONFIG.cloudflare_llm_account_id || CONFIG.cloudflare_account_id || '').trim();
+    modelName = CONFIG.cloudflare_llm_model || '@cf/meta/llama-3.1-8b-instruct';
+    url = `https://api.cloudflare.com/client/v4/accounts/${acc}/ai/run/${modelName}`;
   } else if (provider === 'custom') {
     apiKey = (CONFIG.custom_llm_api_key || 'local').trim();
     modelName = CONFIG.custom_llm_model || 'default';
@@ -520,10 +533,15 @@ async function callDeepSeek(prompt: string): Promise<{ data: any | null; error: 
       max_tokens: Number(CONFIG.max_output_tokens || 250),
     };
   } else {
+    const rawSys = (CONFIG.system_prompt || DEFAULT_CONFIG.system_prompt || '').trim();
+    const effectiveSys = rawSys.toLowerCase().includes('json')
+      ? rawSys
+      : `${rawSys}\n\nВАЖНО: Отвечай строго валидным JSON объектом (JSON format): {"text": "...", "color": [R, G, B], "action": "play" | "stop" | "resume" | "none", "song": "..."}`;
+
     payload = {
       model: modelName,
       messages: [
-        { role: 'system', content: CONFIG.system_prompt || DEFAULT_CONFIG.system_prompt },
+        { role: 'system', content: effectiveSys },
         { role: 'user', content: prompt },
       ],
       temperature: Number(CONFIG.temperature || 0.7),
@@ -534,6 +552,11 @@ async function callDeepSeek(prompt: string): Promise<{ data: any | null; error: 
     if (!modelLower.includes('reasoner') && !modelLower.includes('r1')) {
       payload.response_format = { type: 'json_object' };
     }
+  }
+
+  // Merge extra_payload if present
+  if (CONFIG.llm_extra_payload && typeof CONFIG.llm_extra_payload === 'object') {
+    payload = { ...payload, ...CONFIG.llm_extra_payload };
   }
 
   try {
@@ -552,10 +575,31 @@ async function callDeepSeek(prompt: string): Promise<{ data: any | null; error: 
       const jsonRes = await response.json();
       const content = provider === 'anthropic'
         ? jsonRes?.content?.[0]?.text || '{}'
+        : provider === 'cloudflare'
+        ? (jsonRes?.result?.response || jsonRes?.response || '{}')
         : jsonRes?.choices?.[0]?.message?.content || '{}';
       return { data: parseCleanJsonResponse(content), error: null };
     } else {
       const errText = await response.text();
+
+      // Retry without response_format if rejected
+      if (response.status === 400 && payload.response_format && (errText.includes('response_format') || errText.includes('json') || errText.includes('JSON'))) {
+        const retryPayload = { ...payload };
+        delete retryPayload.response_format;
+        try {
+          const retryRes = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(retryPayload),
+          });
+          if (retryRes.ok) {
+            const jsonRes = await retryRes.json();
+            const content = jsonRes?.choices?.[0]?.message?.content || '{}';
+            return { data: parseCleanJsonResponse(content), error: null };
+          }
+        } catch {}
+      }
+
       return { data: null, error: `${provider} HTTP ${response.status}: ${errText.slice(0, 160)}` };
     }
   } catch (err: any) {
@@ -715,6 +759,18 @@ app.post('/api/config', async (req: Request, res: Response) => {
     'cartesia_tts_model_id',
     'cartesia_tts_voice_id',
     'custom_tts_url',
+    'openrouter_tts_extra_payload',
+    'openrouter_llm_extra_payload',
+    'cloudflare_tts_extra_payload',
+    'cloudflare_llm_extra_payload',
+    'cloudflare_stt_extra_payload',
+    'cloudflare_tts_voice_id',
+    'cloudflare_tts_lang',
+    'cloudflare_llm_account_id',
+    'cloudflare_llm_model',
+    'tts_extra_payload',
+    'llm_extra_payload',
+    'stt_extra_payload',
   ];
   for (const field of allowed) {
     if (field in data) {
@@ -740,6 +796,7 @@ app.post('/api/config', async (req: Request, res: Response) => {
   updateKey('custom_llm_api_key', data.custom_llm_api_key);
   updateKey('deepseek_api_key', data.deepseek_api_key);
   updateKey('cloudflare_api_key', data.cloudflare_api_key);
+  updateKey('cloudflare_llm_api_token', data.cloudflare_llm_api_token);
   updateKey('openrouter_stt_api_key', data.openrouter_stt_api_key);
   updateKey('openai_stt_api_key', data.openai_stt_api_key);
   updateKey('groq_stt_api_key', data.groq_stt_api_key);
@@ -827,10 +884,544 @@ app.post('/api/config', async (req: Request, res: Response) => {
   res.json({ status: 'saved', config: CONFIG });
 });
 
+app.get('/api/config/assistant', (_req: Request, res: Response) => {
+  const mask = (key?: string) => {
+    if (!key) return '';
+    if (key.length > 8) return `${key.slice(0, 4)}...${key.slice(-4)}`;
+    return '***';
+  };
+
+  const llmProv = (CONFIG.llm_provider || 'openrouter').toLowerCase();
+  let llmKey = '';
+  let llmModel = '';
+  let llmAccountId: string | undefined;
+  let llmEndpointUrl: string | undefined;
+
+  if (llmProv === 'openrouter') {
+    llmKey = CONFIG.openrouter_api_key || CONFIG.deepseek_api_key || '';
+    llmModel = CONFIG.openrouter_model || 'deepseek/deepseek-chat';
+  } else if (llmProv === 'cloudflare') {
+    llmKey = CONFIG.cloudflare_llm_api_token || CONFIG.cloudflare_api_key || '';
+    llmAccountId = CONFIG.cloudflare_llm_account_id || CONFIG.cloudflare_account_id || '';
+    llmModel = CONFIG.cloudflare_llm_model || '@cf/meta/llama-3.1-8b-instruct';
+  } else if (llmProv === 'custom' || llmProv === 'local') {
+    llmKey = CONFIG.custom_llm_api_key || '';
+    llmModel = CONFIG.custom_llm_model || 'default';
+    llmEndpointUrl = CONFIG.custom_llm_base_url || 'http://localhost:11434/v1';
+  } else {
+    llmKey = CONFIG.deepseek_api_key || '';
+    llmModel = CONFIG.deepseek_model || 'deepseek-chat';
+  }
+
+  const sttProv = (CONFIG.stt_provider || 'cloudflare').toLowerCase();
+  let sttKey = '';
+  let sttModel = '';
+  let sttAccountId: string | undefined;
+  let sttEndpointUrl: string | undefined;
+
+  if (sttProv === 'openrouter') {
+    sttKey = CONFIG.openrouter_stt_api_key || CONFIG.openrouter_api_key || '';
+    sttModel = CONFIG.openrouter_stt_model || 'openai/whisper';
+  } else if (sttProv === 'custom' || sttProv === 'local') {
+    sttKey = '';
+    sttModel = 'whisper';
+    sttEndpointUrl = CONFIG.custom_stt_url || '';
+  } else {
+    sttKey = CONFIG.cloudflare_api_key || '';
+    sttAccountId = CONFIG.cloudflare_account_id || '';
+    sttModel = CONFIG.stt_model || '@cf/openai/whisper';
+  }
+
+  const ttsProv = (CONFIG.tts_provider || 'google').toLowerCase();
+  let ttsKey = '';
+  let ttsModel = '';
+  let ttsVoice: string | undefined;
+  let ttsAccountId: string | undefined;
+  let ttsEndpointUrl: string | undefined;
+
+  if (ttsProv === 'openrouter') {
+    ttsKey = CONFIG.openrouter_tts_api_key || CONFIG.openrouter_api_key || '';
+    ttsModel = CONFIG.openrouter_tts_model || 'openai/tts-1';
+    ttsVoice = CONFIG.openrouter_tts_voice || 'alloy';
+  } else if (ttsProv === 'cloudflare') {
+    ttsKey = CONFIG.cloudflare_tts_api_token || CONFIG.cloudflare_api_key || '';
+    ttsAccountId = CONFIG.cloudflare_tts_account_id || CONFIG.cloudflare_account_id || '';
+    ttsModel = CONFIG.cloudflare_tts_model || '@cf/myshell/melotts-v1';
+    ttsVoice = CONFIG.cloudflare_tts_voice_id || '21m00Tcm4TlvDq8ikWAM';
+  } else if (ttsProv === 'custom' || ttsProv === 'local') {
+    ttsEndpointUrl = CONFIG.custom_tts_url || '';
+    ttsModel = 'local';
+  } else if (ttsProv === 'openai') {
+    ttsKey = CONFIG.openai_tts_api_key || '';
+    ttsModel = CONFIG.openai_tts_model || 'tts-1';
+    ttsVoice = CONFIG.openai_tts_voice || 'alloy';
+  } else if (ttsProv === 'elevenlabs') {
+    ttsKey = CONFIG.elevenlabs_api_key || '';
+    ttsModel = CONFIG.elevenlabs_model_id || 'eleven_multilingual_v2';
+    ttsVoice = CONFIG.elevenlabs_voice_id || '21m00Tcm4TlvDq8ikWAM';
+  } else {
+    ttsModel = 'google';
+  }
+
+  res.json({
+    llm: {
+      provider: llmProv,
+      model: llmModel,
+      has_key: Boolean(llmKey),
+      key_masked: mask(llmKey),
+      account_id: llmAccountId,
+      endpoint_url: llmEndpointUrl,
+      extra_payload: CONFIG.cloudflare_llm_extra_payload || CONFIG.llm_extra_payload || null,
+    },
+    stt: {
+      provider: sttProv,
+      model: sttModel,
+      has_key: Boolean(sttKey),
+      key_masked: mask(sttKey),
+      account_id: sttAccountId,
+      language: 'ru',
+      endpoint_url: sttEndpointUrl,
+      extra_payload: CONFIG.cloudflare_stt_extra_payload || CONFIG.stt_extra_payload || null,
+    },
+    tts: {
+      provider: ttsProv,
+      model: ttsModel,
+      has_key: Boolean(ttsKey),
+      key_masked: mask(ttsKey),
+      account_id: ttsAccountId,
+      voice: ttsVoice,
+      language: 'ru',
+      endpoint_url: ttsEndpointUrl,
+      extra_payload: CONFIG.cloudflare_tts_extra_payload || CONFIG.tts_extra_payload || null,
+    },
+    system_prompt: CONFIG.system_prompt || DEFAULT_CONFIG.system_prompt,
+    temperature: Number(CONFIG.temperature || 0.7),
+    max_tokens: Number(CONFIG.max_output_tokens || 250),
+  });
+});
+
+app.post('/api/config/assistant', async (req: Request, res: Response) => {
+  const body = req.body || {};
+
+  // Validate extra_payload objects
+  if (body.llm?.extra_payload && (typeof body.llm.extra_payload !== 'object' || Array.isArray(body.llm.extra_payload))) {
+    return res.status(400).json({ error: 'Invalid LLM extra_payload: must be a JSON object' });
+  }
+  if (body.stt?.extra_payload && (typeof body.stt.extra_payload !== 'object' || Array.isArray(body.stt.extra_payload))) {
+    return res.status(400).json({ error: 'Invalid STT extra_payload: must be a JSON object' });
+  }
+  if (body.tts?.extra_payload && (typeof body.tts.extra_payload !== 'object' || Array.isArray(body.tts.extra_payload))) {
+    return res.status(400).json({ error: 'Invalid TTS extra_payload: must be a JSON object' });
+  }
+
+  // LLM updates
+  if (body.llm) {
+    if (body.llm.provider) {
+      CONFIG.llm_provider = String(body.llm.provider).trim().toLowerCase();
+    }
+    if (body.llm.model) {
+      const m = String(body.llm.model).trim();
+      if (CONFIG.llm_provider === 'openrouter') CONFIG.openrouter_model = m;
+      else if (CONFIG.llm_provider === 'cloudflare') CONFIG.cloudflare_llm_model = m;
+      else if (CONFIG.llm_provider === 'custom' || CONFIG.llm_provider === 'local') CONFIG.custom_llm_model = m;
+      else CONFIG.deepseek_model = m;
+    }
+    if (body.llm.api_key && !String(body.llm.api_key).startsWith('*')) {
+      const k = String(body.llm.api_key).trim();
+      if (CONFIG.llm_provider === 'openrouter') CONFIG.openrouter_api_key = k;
+      else if (CONFIG.llm_provider === 'cloudflare') CONFIG.cloudflare_llm_api_token = k;
+      else CONFIG.deepseek_api_key = k;
+    }
+    if (body.llm.account_id) {
+      CONFIG.cloudflare_llm_account_id = String(body.llm.account_id).trim();
+    }
+    if (body.llm.endpoint_url) {
+      CONFIG.custom_llm_base_url = String(body.llm.endpoint_url).trim();
+    }
+    if ('extra_payload' in body.llm) {
+      CONFIG.llm_extra_payload = body.llm.extra_payload || null;
+    }
+  }
+
+  // STT updates
+  if (body.stt) {
+    if (body.stt.provider) {
+      CONFIG.stt_provider = String(body.stt.provider).trim().toLowerCase();
+    }
+    if (body.stt.model) {
+      const m = String(body.stt.model).trim();
+      if (CONFIG.stt_provider === 'openrouter') CONFIG.openrouter_stt_model = m;
+      else CONFIG.stt_model = m;
+    }
+    if (body.stt.api_key && !String(body.stt.api_key).startsWith('*')) {
+      const k = String(body.stt.api_key).trim();
+      if (CONFIG.stt_provider === 'openrouter') CONFIG.openrouter_stt_api_key = k;
+      else CONFIG.cloudflare_api_key = k;
+    }
+    if (body.stt.account_id) {
+      CONFIG.cloudflare_account_id = String(body.stt.account_id).trim();
+    }
+    if (body.stt.endpoint_url) {
+      CONFIG.custom_stt_url = String(body.stt.endpoint_url).trim();
+    }
+    if ('extra_payload' in body.stt) {
+      CONFIG.stt_extra_payload = body.stt.extra_payload || null;
+    }
+  }
+
+  // TTS updates
+  if (body.tts) {
+    if (body.tts.provider) {
+      CONFIG.tts_provider = String(body.tts.provider).trim().toLowerCase();
+    }
+    if (body.tts.model) {
+      const m = String(body.tts.model).trim();
+      if (CONFIG.tts_provider === 'openrouter') CONFIG.openrouter_tts_model = m;
+      else if (CONFIG.tts_provider === 'cloudflare') CONFIG.cloudflare_tts_model = m;
+      else if (CONFIG.tts_provider === 'openai') CONFIG.openai_tts_model = m;
+      else if (CONFIG.tts_provider === 'elevenlabs') CONFIG.elevenlabs_model_id = m;
+    }
+    if (body.tts.voice) {
+      const v = String(body.tts.voice).trim();
+      if (CONFIG.tts_provider === 'openrouter') CONFIG.openrouter_tts_voice = v;
+      else if (CONFIG.tts_provider === 'cloudflare') CONFIG.cloudflare_tts_voice_id = v;
+      else if (CONFIG.tts_provider === 'openai') CONFIG.openai_tts_voice = v;
+      else if (CONFIG.tts_provider === 'elevenlabs') CONFIG.elevenlabs_voice_id = v;
+    }
+    if (body.tts.api_key && !String(body.tts.api_key).startsWith('*')) {
+      const k = String(body.tts.api_key).trim();
+      if (CONFIG.tts_provider === 'openrouter') CONFIG.openrouter_tts_api_key = k;
+      else if (CONFIG.tts_provider === 'cloudflare') CONFIG.cloudflare_tts_api_token = k;
+      else if (CONFIG.tts_provider === 'openai') CONFIG.openai_tts_api_key = k;
+      else if (CONFIG.tts_provider === 'elevenlabs') CONFIG.elevenlabs_api_key = k;
+    }
+    if (body.tts.account_id) {
+      CONFIG.cloudflare_tts_account_id = String(body.tts.account_id).trim();
+    }
+    if (body.tts.endpoint_url) {
+      CONFIG.custom_tts_url = String(body.tts.endpoint_url).trim();
+    }
+    if ('extra_payload' in body.tts) {
+      CONFIG.tts_extra_payload = body.tts.extra_payload || null;
+      if (CONFIG.tts_provider === 'cloudflare') {
+        CONFIG.cloudflare_tts_extra_payload = body.tts.extra_payload || null;
+      }
+    }
+  }
+
+  if (body.system_prompt) {
+    CONFIG.system_prompt = String(body.system_prompt);
+  }
+  if (typeof body.temperature === 'number') {
+    CONFIG.temperature = body.temperature;
+  }
+  if (typeof body.max_tokens === 'number') {
+    CONFIG.max_output_tokens = body.max_tokens;
+  }
+
+  try {
+    fs.writeFileSync(configPath, JSON.stringify(CONFIG, null, 2), 'utf-8');
+    logSystem('INFO', 'Конфигурация ассистента сохранена с поддержкой extra_payload');
+  } catch (err: any) {
+    logSystem('ERROR', `Ошибка сохранения config.json: ${err?.message}`);
+  }
+
+  res.json({ success: true, status: 'saved', config: CONFIG });
+});
+
 // Network information for LAN access
 app.get('/api/network-info', (_req: Request, res: Response) => {
   const info = getNetworkInfo();
   res.json(info);
+});
+
+// ---------------------------------------------------------
+// Wi-Fi & Bluetooth Management & 88x2cs Power Saving
+// ---------------------------------------------------------
+
+async function forwardToDaemonOrAdb(
+  path: string,
+  method: string,
+  body: any,
+  adbFallback: (adbCmd: string) => Promise<any>
+): Promise<any> {
+  const targetIp = (CONFIG.station_ip || LAST_STATION_IP || '192.168.0.106').trim();
+  // 1. Try native station_daemon on port 5000
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch(`http://${targetIp}:5000${path}`, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch {}
+
+  // 2. Fallback to ADB command
+  return await adbFallback(targetIp);
+}
+
+// Wi-Fi Status
+app.get('/api/wifi/status', async (_req: Request, res: Response) => {
+  const result = await forwardToDaemonOrAdb('/api/wifi/status', 'GET', null, async () => {
+    const { ok, out } = await runStationAdbCommand('wpa_cli -i wlan0 status');
+    if (!ok) {
+      return {
+        interface: 'wlan0',
+        connected: false,
+        ssid: '',
+        ip_address: '',
+        mac_address: '',
+        bssid: '',
+        frequency_mhz: 0,
+        signal_level_dbm: 0,
+        wpa_state: 'DISCONNECTED',
+        key_mgmt: '',
+        interface_up: false,
+      };
+    }
+    const lines = out.split('\n');
+    const map: Record<string, string> = {};
+    for (const l of lines) {
+      const idx = l.indexOf('=');
+      if (idx > 0) map[l.slice(0, idx).trim()] = l.slice(idx + 1).trim();
+    }
+    return {
+      interface: 'wlan0',
+      connected: map['wpa_state'] === 'COMPLETED',
+      ssid: map['ssid'] || '',
+      ip_address: map['ip_address'] || '',
+      mac_address: (map['address'] || '').toUpperCase(),
+      bssid: (map['bssid'] || '').toUpperCase(),
+      frequency_mhz: parseInt(map['freq'] || '0', 10),
+      signal_level_dbm: -50,
+      wpa_state: map['wpa_state'] || 'DISCONNECTED',
+      key_mgmt: map['key_mgmt'] || '',
+      interface_up: true,
+    };
+  });
+  res.json(result);
+});
+
+// Wi-Fi Scan
+app.all(['/api/wifi/scan'], async (_req: Request, res: Response) => {
+  const result = await forwardToDaemonOrAdb('/api/wifi/scan', 'POST', null, async () => {
+    const { ok, out } = await runStationAdbCommand('wpa_cli -i wlan0 scan >/dev/null && sleep 1 && wpa_cli -i wlan0 scan_results');
+    if (!ok) return { success: false, error: 'ADB scan failed', networks: [] };
+    const lines = out.split('\n').slice(1);
+    const networks = lines.map(line => {
+      const cols = line.split('\t');
+      return {
+        bssid: cols[0]?.trim() || '',
+        frequency_mhz: parseInt(cols[1]?.trim() || '0', 10),
+        signal_level_dbm: parseInt(cols[2]?.trim() || '-100', 10),
+        flags: cols[3]?.trim() || '',
+        ssid: cols[4]?.trim() || '',
+      };
+    }).filter(n => n.ssid);
+    networks.sort((a, b) => b.signal_level_dbm - a.signal_level_dbm);
+    return { success: true, networks };
+  });
+  res.json(result);
+});
+
+// Wi-Fi Connect
+app.post('/api/wifi/connect', async (req: Request, res: Response) => {
+  const { ssid, psk } = req.body || {};
+  if (!ssid) return res.status(400).json({ success: false, error: 'SSID is required' });
+
+  const result = await forwardToDaemonOrAdb('/api/wifi/connect', 'POST', { ssid, psk }, async () => {
+    const cmd = psk
+      ? `ID=\\$(wpa_cli -i wlan0 add_network) && wpa_cli -i wlan0 set_network \\$ID ssid '"${ssid}"' && wpa_cli -i wlan0 set_network \\$ID psk '"${psk}"' && wpa_cli -i wlan0 enable_network \\$ID && wpa_cli -i wlan0 select_network \\$ID && wpa_cli -i wlan0 save_config && dhcpcd wlan0 &`
+      : `ID=\\$(wpa_cli -i wlan0 add_network) && wpa_cli -i wlan0 set_network \\$ID ssid '"${ssid}"' && wpa_cli -i wlan0 set_network \\$ID key_mgmt NONE && wpa_cli -i wlan0 enable_network \\$ID && wpa_cli -i wlan0 select_network \\$ID && wpa_cli -i wlan0 save_config && dhcpcd wlan0 &`;
+    const { ok, out } = await runStationAdbCommand(cmd);
+    return { success: ok, message: out };
+  });
+  res.json(result);
+});
+
+// Wi-Fi Restart
+app.post('/api/wifi/restart', async (_req: Request, res: Response) => {
+  const result = await forwardToDaemonOrAdb('/api/wifi/restart', 'POST', null, async () => {
+    const { ok, out } = await runStationAdbCommand('/data/kill_and_wifi.sh 2>/dev/null || ifconfig wlan0 up');
+    return { success: ok, message: out };
+  });
+  res.json(result);
+});
+
+// Wi-Fi 88x2cs Power Saving
+app.get('/api/wifi/powersave', async (_req: Request, res: Response) => {
+  const result = await forwardToDaemonOrAdb('/api/wifi/powersave', 'GET', null, async () => {
+    const { ok, out } = await runStationAdbCommand(
+      'echo "rtw_power_mgnt=$(cat /sys/module/88x2cs/parameters/rtw_power_mgnt 2>/dev/null || echo -1)";' +
+      'echo "rtw_ips_mode=$(cat /sys/module/88x2cs/parameters/rtw_ips_mode 2>/dev/null || echo -1)";' +
+      'echo "rtw_smart_ps=$(cat /sys/module/88x2cs/parameters/rtw_smart_ps 2>/dev/null || echo -1)";' +
+      'echo "rtw_lps_level=$(cat /sys/module/88x2cs/parameters/rtw_lps_level 2>/dev/null || echo -1)";'
+    );
+    const map: Record<string, string> = {};
+    if (ok) {
+      for (const l of out.split('\n')) {
+        const idx = l.indexOf('=');
+        if (idx > 0) map[l.slice(0, idx).trim()] = l.slice(idx + 1).trim();
+      }
+    }
+    const rtw_power_mgnt = map['rtw_power_mgnt'] || '2';
+    const rtw_ips_mode = map['rtw_ips_mode'] || '1';
+    const rtw_smart_ps = map['rtw_smart_ps'] || '2';
+    const rtw_lps_level = map['rtw_lps_level'] || '1';
+
+    return {
+      module_present: ok,
+      rtw_power_mgnt,
+      rtw_ips_mode,
+      rtw_smart_ps,
+      rtw_lps_level,
+      is_optimized: rtw_power_mgnt === '0' && rtw_ips_mode === '0' && rtw_smart_ps === '0',
+      critical_explanation: 'ВНИМАНИЕ: Чтобы Wi-Fi не падал после выключения Квазара, отключите энергосбережение 88x2cs (rtw_power_mgnt=0, rtw_ips_mode=0)!',
+      params: [
+        {
+          name: 'rtw_power_mgnt',
+          value: rtw_power_mgnt,
+          recommended_value: '0',
+          is_critical: true,
+          description: 'Главный переключатель энергосбережения чипа: 0 = Выключить полностью (Wi-Fi активен всегда), 1 = Min PS, 2 = Max PS. При выключенном Квазаре значение 1 или 2 переводит чип в глубокий сон и Wi-Fi падает!',
+        },
+        {
+          name: 'rtw_ips_mode',
+          value: rtw_ips_mode,
+          recommended_value: '0',
+          is_critical: true,
+          description: 'Inactive Power Saving (IPS): 0 = Выключить, 1 = Включить. Отключает уход Wi-Fi интерфейса в сон при отсутствии сетевого трафика.',
+        },
+        {
+          name: 'rtw_smart_ps',
+          value: rtw_smart_ps,
+          recommended_value: '0',
+          is_critical: true,
+          description: 'Smart Power Saving: 0 = Выключить, 1/2 = Включить. Предотвращает задержки и потерю пинга при стриминге музыки и вызовах ассистента.',
+        },
+        {
+          name: 'rtw_lps_level',
+          value: rtw_lps_level,
+          recommended_value: '0',
+          is_critical: false,
+          description: 'Leisure Power Saving Level: глубина спящего режима между маяками роутера.',
+        },
+      ],
+    };
+  });
+  res.json(result);
+});
+
+app.post('/api/wifi/powersave', async (req: Request, res: Response) => {
+  const param = (req.body?.param || req.body?.name || '').trim();
+  const value = String(req.body?.value ?? '0').trim();
+  if (!param) return res.status(400).json({ success: false, error: 'Param name is required' });
+
+  const result = await forwardToDaemonOrAdb('/api/wifi/powersave', 'POST', { param, value }, async () => {
+    const { ok, out } = await runStationAdbCommand(`echo ${value} > /sys/module/88x2cs/parameters/${param}`);
+    return { success: ok, message: ok ? `Param ${param} set to ${value}` : out };
+  });
+  res.json(result);
+});
+
+app.post('/api/wifi/powersave/optimize', async (_req: Request, res: Response) => {
+  const result = await forwardToDaemonOrAdb('/api/wifi/powersave/optimize', 'POST', null, async () => {
+    const cmd = 'echo 0 > /sys/module/88x2cs/parameters/rtw_power_mgnt; echo 0 > /sys/module/88x2cs/parameters/rtw_ips_mode; echo 0 > /sys/module/88x2cs/parameters/rtw_smart_ps; [ -f /sys/module/88x2cs/parameters/rtw_lps_mode ] && echo 0 > /sys/module/88x2cs/parameters/rtw_lps_mode; echo 0 > /sys/module/88x2cs/parameters/rtw_low_power 2>/dev/null';
+    const { ok, out } = await runStationAdbCommand(cmd);
+    return { success: ok, message: ok ? 'Power saving disabled successfully' : out };
+  });
+  res.json(result);
+});
+
+// Bluetooth
+app.get('/api/bluetooth/status', async (_req: Request, res: Response) => {
+  const result = await forwardToDaemonOrAdb('/api/bluetooth/status', 'GET', null, async () => {
+    const { ok, out } = await runStationAdbCommand('hciconfig hci0');
+    let address = '';
+    let powered = false;
+    if (ok) {
+      const m = out.match(/BD Address:\s*([0-9A-Fa-f:]+)/);
+      if (m) address = m[1].toUpperCase();
+      powered = out.includes('UP RUNNING') || out.includes('UP');
+    }
+    return {
+      available: ok,
+      adapter: 'hci0',
+      address,
+      name: 'Яндекс Лайт',
+      powered,
+      discoverable: false,
+      devices: [],
+    };
+  });
+  res.json(result);
+});
+
+app.post('/api/bluetooth/toggle', async (req: Request, res: Response) => {
+  const powered = Boolean(req.body?.powered);
+  const result = await forwardToDaemonOrAdb('/api/bluetooth/toggle', 'POST', { powered }, async () => {
+    const arg = powered ? 'up' : 'down';
+    const { ok, out } = await runStationAdbCommand(`hciconfig hci0 ${arg}`);
+    return { success: ok, powered, message: out };
+  });
+  res.json(result);
+});
+
+app.all(['/api/bluetooth/scan'], async (_req: Request, res: Response) => {
+  const result = await forwardToDaemonOrAdb('/api/bluetooth/scan', 'POST', null, async () => {
+    const { ok, out } = await runStationAdbCommand('hciconfig hci0 up && timeout 5 hcitool scan 2>/dev/null');
+    if (!ok) return { success: false, devices: [] };
+    const lines = out.split('\n');
+    const devices = [];
+    for (const l of lines) {
+      const parts = l.trim().split(/\s+/);
+      if (parts.length >= 2 && parts[0].includes(':')) {
+        devices.push({
+          address: parts[0].toUpperCase(),
+          name: parts.slice(1).join(' '),
+          connected: false,
+          paired: false,
+        });
+      }
+    }
+    return { success: true, devices };
+  });
+  res.json(result);
+});
+
+app.post('/api/bluetooth/connect', async (req: Request, res: Response) => {
+  const address = req.body?.address;
+  const result = await forwardToDaemonOrAdb('/api/bluetooth/connect', 'POST', { address }, async () => {
+    const { ok, out } = await runStationAdbCommand(`bluetoothctl connect ${address}`);
+    return { success: ok, output: out };
+  });
+  res.json(result);
+});
+
+app.post('/api/bluetooth/disconnect', async (req: Request, res: Response) => {
+  const address = req.body?.address;
+  const result = await forwardToDaemonOrAdb('/api/bluetooth/disconnect', 'POST', { address }, async () => {
+    const { ok, out } = await runStationAdbCommand(`bluetoothctl disconnect ${address}`);
+    return { success: ok, output: out };
+  });
+  res.json(result);
+});
+
+// Terminal execution
+app.post(['/api/command', '/api/terminal/run'], async (req: Request, res: Response) => {
+  const command = req.body?.command || '';
+  if (!command) return res.status(400).json({ success: false, error: 'Command required' });
+  const result = await forwardToDaemonOrAdb('/api/terminal/run', 'POST', { command }, async () => {
+    const { ok, out } = await runStationAdbCommand(command);
+    return { success: ok, out, output: out };
+  });
+  res.json(result);
 });
 
 // Ping & connectivity check for Station
@@ -1204,21 +1795,166 @@ app.post('/api/player/play_song', async (req: Request, res: Response) => {
   });
 });
 
-app.get('/api/soundcloud/search', async (req: Request, res: Response) => {
+async function searchYouTubeMusic(query: string, limit = 12): Promise<any[]> {
+  try {
+    const resp = await fetch('https://music.youtube.com/youtubei/v1/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      },
+      body: JSON.stringify({
+        context: { client: { clientName: 'WEB_REMIX', clientVersion: '1.20231201.01.00' } },
+        query,
+      }),
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!resp.ok) return [];
+    const data: any = await resp.json();
+    const results: any[] = [];
+    const list =
+      data.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents || [];
+
+    // Top card
+    const card = list[0]?.musicCardShelfRenderer;
+    if (card) {
+      const title = card.title?.runs?.[0]?.text;
+      const sub = (card.subtitle?.runs || []).map((x: any) => x.text).join('').replace(/^Song\s*•\s*/i, '').trim();
+      const vId =
+        card.onTap?.watchEndpoint?.videoId ||
+        card.buttons?.[0]?.buttonRenderer?.command?.watchEndpoint?.videoId;
+      const thumb = card.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.slice(-1)?.[0]?.url;
+      if (title && vId) {
+        results.push({
+          id: vId,
+          title,
+          artist: sub || 'YouTube Music',
+          artwork_url: thumb || null,
+          permalink_url: `https://music.youtube.com/watch?v=${vId}`,
+          source: 'ytmusic',
+        });
+      }
+    }
+
+    // Shelf items
+    for (const sec of list) {
+      const item = sec.itemSectionRenderer?.contents?.[0]?.musicResponsiveListItemRenderer;
+      if (!item) continue;
+      const vId =
+        item.playlistItemData?.videoId ||
+        item.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint?.videoId;
+      if (!vId) continue;
+      const cols = item.flexColumns || [];
+      const title = cols[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text;
+      const artist = (cols[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [])
+        .map((x: any) => x.text)
+        .join('')
+        .replace(/^Song\s*•\s*/i, '')
+        .trim();
+      const thumb = item.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.slice(-1)?.[0]?.url;
+      if (title) {
+        results.push({
+          id: vId,
+          title,
+          artist: artist || 'YouTube Music',
+          artwork_url: thumb || null,
+          permalink_url: `https://music.youtube.com/watch?v=${vId}`,
+          source: 'ytmusic',
+        });
+      }
+      if (results.length >= limit) break;
+    }
+    return results;
+  } catch {
+    return [];
+  }
+}
+
+async function searchSoundCloudTracks(query: string, limit = 10): Promise<{ results: any[]; lastErr: string }> {
+  const clientIds = [
+    'xk6BGxLCsQJ5Ss0bH6sRdsZhts3gTNaU',
+    'a3e059563d7fd3372b49b37f00a00bcf',
+    '2t9loNfh0ekOfbnLeBYjdO50ExQ0edIF',
+    'iZIs9mchVcX5lhVR1EzGCcyddKZaPjai',
+    'fDoItMDL104mveTnd7qveY4vEw0bF41n',
+  ];
+
+  let lastErr = 'SoundCloud недоступен';
+  for (const cid of clientIds) {
+    try {
+      const scUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&client_id=${cid}&limit=${limit}`;
+      const resp = await fetch(scUrl, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/javascript, */*; q=0.01',
+          'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Origin': 'https://soundcloud.com',
+          'Referer': 'https://soundcloud.com/',
+        },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (resp.ok) {
+        const data: any = await resp.json();
+        const results = (data.collection || []).map((t: any) => ({
+          id: t.id,
+          title: t.title || 'Unknown Title',
+          artist: t.user?.username || 'Unknown Artist',
+          duration_ms: t.duration || 0,
+          artwork_url: t.artwork_url || null,
+          permalink_url: t.permalink_url || '',
+          source: 'soundcloud',
+        }));
+        return { results, lastErr: '' };
+      } else {
+        lastErr = `HTTP ${resp.status}`;
+      }
+    } catch (e: any) {
+      lastErr = e?.message || 'Connection error';
+    }
+  }
+  return { results: [], lastErr };
+}
+
+async function searchRadioBrowserStations(query: string, limit = 10): Promise<any[]> {
+  try {
+    const radioUrl = `https://de1.api.radio-browser.info/json/stations/byname/${encodeURIComponent(query)}?limit=${limit}`;
+    const rResp = await fetch(radioUrl, { signal: AbortSignal.timeout(3500) });
+    if (rResp.ok) {
+      const stations: any = await rResp.json();
+      if (Array.isArray(stations) && stations.length > 0) {
+        return stations.map((st: any, idx: number) => ({
+          id: 9000000 + idx,
+          title: st.name?.trim() || 'Radio Station',
+          artist: `Online Radio • ${st.tags || 'Live'}`,
+          duration_ms: 0,
+          artwork_url: st.favicon || null,
+          permalink_url: st.url_resolved || st.url || '',
+          source: 'radio',
+        }));
+      }
+    }
+  } catch {}
+  return [];
+}
+
+const handleUniversalMusicSearch = async (req: Request, res: Response) => {
   const q = String(req.query.q || '').trim();
   if (!q) {
     return res.status(400).json({ error: 'Empty query' });
   }
-  const limit = Math.max(1, Math.min(25, Number(req.query.limit || 8)));
+  const source = String(req.query.source || 'all').toLowerCase();
+  const limit = Math.max(1, Math.min(25, Number(req.query.limit || 12)));
   const targetIp = CONFIG.station_ip?.trim() || LAST_STATION_IP;
 
   // 1. If station daemon is online, try proxying to daemon
   if (targetIp) {
     try {
       const c = new AbortController();
-      const t = setTimeout(() => c.abort(), 2500);
+      const t = setTimeout(() => c.abort(), 3000);
       const resp = await fetch(
-        `http://${targetIp}:5000/api/soundcloud/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+        `http://${targetIp}:5000/api/music/search?q=${encodeURIComponent(q)}&source=${source}&limit=${limit}`,
         { signal: c.signal }
       );
       clearTimeout(t);
@@ -1229,33 +1965,61 @@ app.get('/api/soundcloud/search', async (req: Request, res: Response) => {
     } catch {}
   }
 
-  // 2. Direct SoundCloud API v2
-  try {
-    const clientId = 'xk6BGxLCsQJ5Ss0bH6sRdsZhts3gTNaU';
-    const scUrl = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(q)}&client_id=${clientId}&limit=${limit}`;
-    const resp = await fetch(scUrl, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      },
-    });
-    if (resp.ok) {
-      const data: any = await resp.json();
-      const results = (data.collection || []).map((t: any) => ({
-        id: t.id,
-        title: t.title || 'Unknown Title',
-        artist: t.user?.username || 'Unknown Artist',
-        duration_ms: t.duration || 0,
-        artwork_url: t.artwork_url || null,
-        permalink_url: t.permalink_url || '',
-      }));
-      return res.json({ success: true, query: q, results });
-    }
-    res.status(502).json({ error: 'SoundCloud API error' });
-  } catch (e: any) {
-    res.status(500).json({ error: e?.message || 'Failed to search SoundCloud' });
+  // 2. Direct search handling based on requested source
+  if (source === 'ytmusic' || source === 'youtube' || source === 'yt') {
+    const ytTracks = await searchYouTubeMusic(q, limit);
+    return res.json({ success: true, query: q, source: 'ytmusic', results: ytTracks });
   }
-});
+
+  if (source === 'radio') {
+    const radioTracks = await searchRadioBrowserStations(q, limit);
+    return res.json({ success: true, query: q, source: 'radio', results: radioTracks });
+  }
+
+  if (source === 'soundcloud' || source === 'sc') {
+    const sc = await searchSoundCloudTracks(q, limit);
+    if (sc.results.length > 0) {
+      return res.json({ success: true, query: q, source: 'soundcloud', results: sc.results });
+    }
+    const fallbackRadio = await searchRadioBrowserStations(q, limit);
+    return res.json({
+      success: fallbackRadio.length > 0,
+      query: q,
+      source: 'soundcloud',
+      error: fallbackRadio.length > 0 ? null : `SoundCloud API недоступен (${sc.lastErr}).`,
+      results: fallbackRadio,
+    });
+  }
+
+  // "all" - Search YouTube Music and SoundCloud in parallel
+  const [ytTracks, scResult] = await Promise.all([
+    searchYouTubeMusic(q, Math.ceil(limit / 2) + 2),
+    searchSoundCloudTracks(q, Math.ceil(limit / 2) + 2),
+  ]);
+
+  const combined: any[] = [];
+  const maxLen = Math.max(ytTracks.length, scResult.results.length);
+  for (let i = 0; i < maxLen; i++) {
+    if (ytTracks[i]) combined.push(ytTracks[i]);
+    if (scResult.results[i]) combined.push(scResult.results[i]);
+    if (combined.length >= limit) break;
+  }
+
+  if (combined.length === 0) {
+    const fallbackRadio = await searchRadioBrowserStations(q, limit);
+    combined.push(...fallbackRadio);
+  }
+
+  res.json({
+    success: true,
+    query: q,
+    source: 'all',
+    results: combined,
+  });
+};
+
+app.get('/api/music/search', handleUniversalMusicSearch);
+app.get('/api/soundcloud/search', handleUniversalMusicSearch);
 
 app.post('/api/soundcloud/play', async (req: Request, res: Response) => {
   const song = (req.body?.song || '').trim();

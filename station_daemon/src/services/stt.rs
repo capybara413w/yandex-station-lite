@@ -1,5 +1,8 @@
 use crate::config::{ProxyConfig, SttConfig};
 use crate::hardware::LedController;
+use crate::services::clients::{
+    BoxFuture, CloudflareSttClient, LocalSttClient, OpenRouterSttClient, SttClient,
+};
 use reqwest::multipart::{Form, Part};
 use reqwest::Client;
 use std::fs;
@@ -39,7 +42,7 @@ impl SttService {
     }
 
     /// Records audio from Station microphone (raw Linear PCM, 16-bit, 16000Hz, mono),
-    /// converts to WAV container and transcribes via Cloudflare Workers AI (@cf/openai/whisper).
+    /// converts to WAV container and transcribes via selected provider.
     /// Manages /tmp/listen.lock and LED indications (Blue recording, Amber processing, Clear on finish).
     pub async fn record_and_transcribe(&self, led: &LedController) -> Result<String, String> {
         let lock_path = "/tmp/listen.lock";
@@ -117,47 +120,66 @@ impl SttService {
             }
         };
 
-        let provider = self.config.provider.to_lowercase();
         let wav_bytes = pcm_to_wav(&audio_bytes, self.sample_rate, 1, 16);
 
-        let trans_res = match provider.as_str() {
-            "openrouter" => {
-                let key = if !self.config.openrouter_api_key.is_empty() {
-                    &self.config.openrouter_api_key
-                } else {
-                    &self.config.api_key
-                };
-                if key.is_empty() {
-                    let _ = fs::remove_file(lock_path);
-                    led.clear();
-                    warn!("OpenRouter STT API key not configured");
-                    return Err("OpenRouter STT API key not configured".to_string());
-                }
-                let model = if !self.config.openrouter_model.is_empty() {
-                    &self.config.openrouter_model
-                } else {
-                    "openai/whisper"
-                };
-                info!("Sending audio ({} bytes) to OpenRouter Whisper (model: {})...", wav_bytes.len(), model);
-                let part = Part::bytes(wav_bytes)
-                    .file_name("audio.wav")
-                    .mime_str("audio/wav")
-                    .map_err(|e| format!("Multipart error: {}", e))?;
-                let mut form = Form::new()
-                    .part("file", part)
-                    .text("model", model.to_string());
-                if !self.config.language.is_empty() {
-                    form = form.text("language", self.config.language.clone());
-                }
-                self.client
-                    .post("https://openrouter.ai/api/v1/audio/transcriptions")
-                    .header("Authorization", format!("Bearer {}", key))
-                    .header("HTTP-Referer", "https://station.local")
-                    .header("X-Title", "Yandex Station Lite Daemon")
-                    .multipart(form)
-                    .send()
-                    .await
+        let res = self.transcribe_wav(&wav_bytes).await;
+        let _ = fs::remove_file(lock_path);
+        led.clear();
+
+        match res {
+            Ok(transcript) => {
+                info!("Recognized speech: '{}'", transcript);
+                Ok(transcript)
             }
+            Err(e) => {
+                warn!("STT error: {}", e);
+                Err(e)
+            }
+        }
+    }
+
+    /// Transcribes WAV audio bytes using the configured STT provider.
+    pub async fn transcribe_wav(&self, wav_bytes: &[u8]) -> Result<String, String> {
+        let provider = self.config.provider.to_lowercase();
+
+        if provider == "openrouter" {
+            let key = if !self.config.openrouter_api_key.is_empty() {
+                self.config.openrouter_api_key.clone()
+            } else {
+                self.config.api_key.clone()
+            };
+            let client = OpenRouterSttClient::new(
+                self.client.clone(),
+                key,
+                self.config.openrouter_model.clone(),
+                self.config.language.clone(),
+                self.config.extra_payload.clone(),
+            );
+            return client.transcribe(wav_bytes).await;
+        }
+
+        if provider == "cloudflare" || provider == "workers_ai" {
+            let client = CloudflareSttClient::new(
+                self.client.clone(),
+                self.config.account_id.clone(),
+                self.config.api_key.clone(),
+                self.config.model.clone(),
+                self.config.extra_payload.clone(),
+            );
+            return client.transcribe(wav_bytes).await;
+        }
+
+        if provider == "custom" || provider == "local" {
+            let client = LocalSttClient::new(
+                self.client.clone(),
+                self.config.custom_url.clone(),
+                self.config.api_key.clone(),
+                self.config.extra_payload.clone(),
+            );
+            return client.transcribe(wav_bytes).await;
+        }
+
+        let trans_res = match provider.as_str() {
             "openai" => {
                 let key = if !self.config.openai_api_key.is_empty() {
                     &self.config.openai_api_key
@@ -165,8 +187,6 @@ impl SttService {
                     &self.config.api_key
                 };
                 if key.is_empty() {
-                    let _ = fs::remove_file(lock_path);
-                    led.clear();
                     warn!("OpenAI STT API key not configured");
                     return Err("OpenAI STT API key not configured".to_string());
                 }
@@ -176,7 +196,7 @@ impl SttService {
                     "whisper-1"
                 };
                 info!("Sending audio ({} bytes) to OpenAI Whisper (model: {})...", wav_bytes.len(), model);
-                let part = Part::bytes(wav_bytes)
+                let part = Part::bytes(wav_bytes.to_vec())
                     .file_name("audio.wav")
                     .mime_str("audio/wav")
                     .map_err(|e| format!("Multipart error: {}", e))?;
@@ -200,8 +220,6 @@ impl SttService {
                     &self.config.api_key
                 };
                 if key.is_empty() {
-                    let _ = fs::remove_file(lock_path);
-                    led.clear();
                     warn!("Groq STT API key not configured");
                     return Err("Groq STT API key not configured".to_string());
                 }
@@ -211,7 +229,7 @@ impl SttService {
                     "whisper-large-v3-turbo"
                 };
                 info!("Sending audio ({} bytes) to Groq Whisper (model: {})...", wav_bytes.len(), model);
-                let part = Part::bytes(wav_bytes)
+                let part = Part::bytes(wav_bytes.to_vec())
                     .file_name("audio.wav")
                     .mime_str("audio/wav")
                     .map_err(|e| format!("Multipart error: {}", e))?;
@@ -235,8 +253,6 @@ impl SttService {
                     &self.config.api_key
                 };
                 if key.is_empty() {
-                    let _ = fs::remove_file(lock_path);
-                    led.clear();
                     warn!("Deepgram STT API key not configured");
                     return Err("Deepgram STT API key not configured".to_string());
                 }
@@ -259,73 +275,21 @@ impl SttService {
                     .post(&url)
                     .header("Authorization", format!("Token {}", key))
                     .header("Content-Type", "audio/wav")
-                    .body(wav_bytes)
+                    .body(wav_bytes.to_vec())
                     .send()
                     .await
-            }
-            "custom" => {
-                let url = self.config.custom_url.trim();
-                if url.is_empty() {
-                    let _ = fs::remove_file(lock_path);
-                    led.clear();
-                    return Err("Custom STT endpoint URL not configured".to_string());
-                }
-                info!("Sending audio ({} bytes) to Custom STT ({})...", wav_bytes.len(), url);
-                let part = Part::bytes(wav_bytes)
-                    .file_name("audio.wav")
-                    .mime_str("audio/wav")
-                    .map_err(|e| format!("Multipart error: {}", e))?;
-                let form = Form::new()
-                    .part("file", part)
-                    .text("model", "whisper".to_string());
-                let mut req = self.client.post(url).multipart(form);
-                if !self.config.api_key.is_empty() {
-                    req = req.header("Authorization", format!("Bearer {}", self.config.api_key));
-                }
-                req.send().await
             }
             _ => {
-                // Cloudflare Workers AI default
-                let api_key = self.config.api_key.trim();
-                let account_id = self.config.account_id.trim();
-                if api_key.is_empty() {
-                    let _ = fs::remove_file(lock_path);
-                    led.clear();
-                    warn!("Cloudflare API token (api_key) is not configured in config.json");
-                    return Err("Cloudflare API key not configured".to_string());
-                }
-                if account_id.is_empty() {
-                    let _ = fs::remove_file(lock_path);
-                    led.clear();
-                    warn!("Cloudflare account_id is not configured in config.json");
-                    return Err("Cloudflare account_id not configured".to_string());
-                }
-                let model = if self.config.model.trim().is_empty() {
-                    "@cf/openai/whisper"
-                } else {
-                    self.config.model.trim()
-                };
-                let api_url = format!(
-                    "https://api.cloudflare.com/client/v4/accounts/{}/ai/run/{}",
-                    account_id, model
+                let fallback = CloudflareSttClient::new(
+                    self.client.clone(),
+                    self.config.account_id.clone(),
+                    self.config.api_key.clone(),
+                    self.config.model.clone(),
+                    self.config.extra_payload.clone(),
                 );
-                info!(
-                    "Audio captured ({} raw PCM bytes -> {} WAV bytes), sending to Cloudflare Workers AI (model: {})...",
-                    audio_bytes.len(),
-                    wav_bytes.len(),
-                    model
-                );
-                self.client
-                    .post(&api_url)
-                    .header("Authorization", format!("Bearer {}", api_key))
-                    .header("Content-Type", "application/octet-stream")
-                    .body(wav_bytes)
-                    .send()
-                    .await
+                return fallback.transcribe(wav_bytes).await;
             }
         };
-
-        let _ = fs::remove_file(lock_path);
 
         match trans_res {
             Ok(resp) => {
@@ -335,26 +299,30 @@ impl SttService {
                     info!("STT [{}] Raw Response: {}", provider, body_text);
 
                     if let Some(transcript) = parse_stt_result(&provider, &body_text) {
-                        info!("Recognized speech via {}: '{}'", provider, transcript);
-                        led.clear();
                         Ok(transcript)
                     } else {
-                        led.clear();
                         warn!("STT [{}]: speech not recognized or silence in response", provider);
                         Err(format!("STT [{}]: speech not recognized (silence)", provider))
                     }
                 } else {
-                    led.clear();
                     error!("STT [{}] API error HTTP {}: {}", provider, status, body_text);
                     Err(format!("STT [{}] returned HTTP {}: {}", provider, status, body_text))
                 }
             }
             Err(e) => {
-                led.clear();
                 error!("STT [{}] network error: {}", provider, e);
                 Err(format!("STT [{}] network error: {}", provider, e))
             }
         }
+    }
+}
+
+impl SttClient for SttService {
+    fn transcribe<'a>(
+        &'a self,
+        wav_bytes: &'a [u8],
+    ) -> BoxFuture<'a, Result<String, String>> {
+        Box::pin(async move { self.transcribe_wav(wav_bytes).await })
     }
 }
 

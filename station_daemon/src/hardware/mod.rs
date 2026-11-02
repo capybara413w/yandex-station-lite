@@ -1,3 +1,10 @@
+pub mod network;
+
+pub use network::{
+    BluetoothStatus, BtDeviceInfo, NetworkHardware, WifiApInfo, WifiPowerSaveConfig,
+    WifiPowerSaveParam, WifiStatus,
+};
+
 use crate::config::{AudioConfig, HardwareConfig};
 use std::fs;
 use std::path::Path;

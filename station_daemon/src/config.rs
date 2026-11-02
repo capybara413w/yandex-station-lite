@@ -72,6 +72,18 @@ pub struct DeepSeekConfig {
     pub together_api_key: String,
     #[serde(default = "default_together_model")]
     pub together_model: String,
+    #[serde(default)]
+    pub cloudflare_account_id: String,
+    #[serde(default)]
+    pub cloudflare_api_token: String,
+    #[serde(default = "default_cloudflare_llm_model")]
+    pub cloudflare_model: String,
+    #[serde(default)]
+    pub extra_payload: Option<serde_json::Value>,
+}
+
+fn default_cloudflare_llm_model() -> String {
+    "@cf/meta/llama-3.1-8b-instruct".to_string()
 }
 
 impl Default for DeepSeekConfig {
@@ -101,6 +113,10 @@ impl Default for DeepSeekConfig {
             perplexity_model: default_perplexity_model(),
             together_api_key: String::new(),
             together_model: default_together_model(),
+            cloudflare_account_id: String::new(),
+            cloudflare_api_token: String::new(),
+            cloudflare_model: default_cloudflare_llm_model(),
+            extra_payload: None,
         }
     }
 }
@@ -176,6 +192,8 @@ pub struct SttConfig {
     pub deepgram_model: String,
     #[serde(default)]
     pub custom_url: String,
+    #[serde(default)]
+    pub extra_payload: Option<serde_json::Value>,
 }
 
 impl Default for SttConfig {
@@ -195,6 +213,7 @@ impl Default for SttConfig {
             deepgram_api_key: String::new(),
             deepgram_model: default_deepgram_stt_model(),
             custom_url: String::new(),
+            extra_payload: None,
         }
     }
 }
@@ -298,10 +317,22 @@ pub struct CloudflareTtsConfig {
     pub api_token: String,
     #[serde(default = "default_cf_tts_model")]
     pub model: String,
+    #[serde(default = "default_cf_tts_voice")]
+    pub voice_id: String,
+    #[serde(default = "default_cf_tts_lang")]
+    pub lang: String,
+    #[serde(default)]
+    pub extra_payload: Option<serde_json::Value>,
 }
 
 fn default_cf_tts_model() -> String {
     "@cf/myshell/melotts-v1".to_string()
+}
+fn default_cf_tts_voice() -> String {
+    "21m00Tcm4TlvDq8ikWAM".to_string()
+}
+fn default_cf_tts_lang() -> String {
+    "ru".to_string()
 }
 
 impl Default for CloudflareTtsConfig {
@@ -310,6 +341,9 @@ impl Default for CloudflareTtsConfig {
             account_id: String::new(),
             api_token: String::new(),
             model: default_cf_tts_model(),
+            voice_id: default_cf_tts_voice(),
+            lang: default_cf_tts_lang(),
+            extra_payload: None,
         }
     }
 }
@@ -409,6 +443,8 @@ pub struct OpenRouterTtsConfig {
     pub model: String,
     #[serde(default = "default_openrouter_tts_voice")]
     pub voice: String,
+    #[serde(default)]
+    pub extra_payload: Option<serde_json::Value>,
 }
 
 fn default_openrouter_tts_model() -> String {
@@ -424,6 +460,7 @@ impl Default for OpenRouterTtsConfig {
             api_key: String::new(),
             model: default_openrouter_tts_model(),
             voice: default_openrouter_tts_voice(),
+            extra_payload: None,
         }
     }
 }
@@ -446,6 +483,8 @@ pub struct TtsConfig {
     pub cartesia: CartesiaTtsConfig,
     #[serde(default)]
     pub custom: CustomTtsConfig,
+    #[serde(default)]
+    pub extra_payload: Option<serde_json::Value>,
 }
 
 fn default_tts_provider() -> String {
@@ -463,6 +502,7 @@ impl Default for TtsConfig {
             deepgram: DeepgramTtsConfig::default(),
             cartesia: CartesiaTtsConfig::default(),
             custom: CustomTtsConfig::default(),
+            extra_payload: None,
         }
     }
 }
@@ -554,3 +594,84 @@ impl AppConfig {
         Self::default()
     }
 }
+
+/// Merges user-supplied extra_payload JSON object into base JSON request object.
+/// If extra_payload contains keys that exist in base, extra_payload overrides them.
+pub fn merge_extra_payload(base: &mut serde_json::Value, extra: Option<&serde_json::Value>) {
+    if let Some(extra_val) = extra {
+        if let (Some(base_map), Some(extra_map)) = (base.as_object_mut(), extra_val.as_object()) {
+            for (k, v) in extra_map {
+                base_map.insert(k.clone(), v.clone());
+            }
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Assistant Config REST API Models (GET/POST /api/config/assistant)
+// ----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssistantStageInfo {
+    pub provider: String,
+    pub model: String,
+    pub has_key: bool,
+    pub key_masked: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voice: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_payload: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssistantConfigResponse {
+    pub llm: AssistantStageInfo,
+    pub stt: AssistantStageInfo,
+    pub tts: AssistantStageInfo,
+    pub system_prompt: String,
+    pub temperature: f32,
+    pub max_tokens: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UpdateAssistantStagePayload {
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub account_id: Option<String>,
+    #[serde(default)]
+    pub voice: Option<String>,
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub endpoint_url: Option<String>,
+    #[serde(default)]
+    pub extra_payload: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UpdateAssistantConfigPayload {
+    #[serde(default)]
+    pub llm: Option<UpdateAssistantStagePayload>,
+    #[serde(default)]
+    pub stt: Option<UpdateAssistantStagePayload>,
+    #[serde(default)]
+    pub tts: Option<UpdateAssistantStagePayload>,
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+}
+

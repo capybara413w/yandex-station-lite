@@ -1,5 +1,6 @@
 {
-  "name": "yandex-station-lite-control-center",
+  "name": "yandex-station-lite",
+  "description": "Автономный Rust-демон и веб-центр управления для Яндекс Станции Лайт v1 (Amlogic A113X)",
   "version": "1.0.0",
   "type": "module",
   "scripts": {

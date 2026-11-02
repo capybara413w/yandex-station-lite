@@ -1,14 +1,17 @@
 {
-    "deepseek_api_key": "",
-    "deepseek_model": "deepseek-chat",
-    "system_prompt": "Ты — умный голосовой ассистент смарт-колонки с поддержкой управления музыкой и светодиодной подсветкой.\nТвои ответы сразу отправляются в голосовой синтезатор (TTS) и воспроизводятся динамиком.\n\nОСНОВНЫЕ ПРАВИЛА:\n1. Краткость: Отвечай емко, живо и лаконично (строго 1–2 коротких предложения). Никаких длинных лекций.\n2. Чистая речь: Категорически запрещен Markdown — никаких звездочек (*), решеток (#), списков, цитат, смайликов и сложных спецсимволов. Текст должен легко читаться вслух.\n3. Формат ответа: Твой ответ ОБЯЗАТЕЛЬНО должен быть строго валидным JSON-объектом:\n{\n  \"text\": \"Текст ответа для синтезатора речи\",\n  \"color\": [R, G, B],\n  \"action\": \"play\" | \"stop\" | \"resume\" | \"none\",\n  \"song\": \"Поисковый запрос для SoundCloud\"\n}\n\nЛОГИКА ПОЛЯ \"action\" И \"song\":\n- \"play\": когда пользователь просит включить конкретную новую песню, трек, альбом, группу или музыку под настроение. В \"song\" укажи четкий поисковый запрос (например: \"Other Friends Sarah Stiles\"). В \"text\" подтверди: \"Включаю Other Friends.\".\n- \"stop\": когда просят выключить, остановить или поставить на паузу музыку. Поле \"song\" оставь пустым: \"\". В \"text\" подтверди: \"Останавливаю музыку.\".\n- \"resume\": когда просят продолжить, возобновить, играть дальше или снять с паузы текущую музыку. Поле \"song\" оставь пустым: \"\". В \"text\" подтверди: \"Продолжаю воспроизведение.\".\n- \"none\": для обычных диалогов, вопросов, фактов или управления цветом. Поле \"song\" оставь пустым: \"\".\n\nЛОГИКА ПОЛЯ \"color\" ([R, G, B] от 0 до 255):\n1. Прямой запрос цвета подсветки — ставь цвет пользователя (синий [0, 80, 255], зеленый [0, 255, 0], красный [255, 0, 0], фиолетовый [180, 0, 255]).\n2. Музыка — насыщенный цвет под стиль трека (рок — [255, 30, 30], поп/электро — [0, 240, 200], мульт/саундтрек — [180, 0, 255]).\n3. Обычные ответы — спокойный лазурный [0, 150, 255] или радостный янтарный [255, 180, 0].",
+  "server": {
+    "bind_address": "0.0.0.0",
+    "port": 5000,
+    "web_static_dir": "/data/station_web"
+  },
+  "deepseek": {
+    "provider": "deepseek",
+    "api_key": "YOUR_DEEPSEEK_API_KEY_HERE",
+    "model": "deepseek-chat",
     "temperature": 0.7,
-    "max_output_tokens": 250,
-    "server_port": 3000,
-    "server_ip": "10.254.202.25",
-    "station_ip": "",
-    "llm_provider": "openrouter",
-    "openrouter_api_key": "",
+    "max_tokens": 250,
+    "system_prompt": "Ты — умный голосовой ассистент смарт-колонки с поддержкой управления музыкой и светодиодной подсветкой. Отвечай кратко в 1-2 предложения строго валидным JSON: {\"text\": \"...\", \"color\": [R, G, B], \"action\": \"play\" | \"stop\" | \"resume\" | \"none\", \"song\": \"...\"}.",
+    "openrouter_api_key": "YOUR_OPENROUTER_API_KEY_HERE",
     "openrouter_model": "deepseek/deepseek-chat",
     "groq_api_key": "",
     "groq_model": "llama-3.3-70b-versatile",
@@ -16,19 +19,107 @@
     "openai_model": "gpt-4o-mini",
     "mistral_api_key": "",
     "mistral_model": "mistral-small-latest",
-    "custom_llm_base_url": "http://localhost:11434/v1",
-    "custom_llm_model": "llama3",
-    "cloudflare_account_id": "",
-    "cloudflare_api_key": "",
-    "stt_provider": "cloudflare",
-    "tts_provider": "elevenlabs",
-    "elevenlabs_api_key": "",
-    "elevenlabs_model_id": "eleven_multilingual_v2",
-    "elevenlabs_voice_id": "21m00Tcm4TlvDq8ikWAM",
-    "cloudflare_tts_account_id": "",
-    "cloudflare_tts_api_token": "",
-    "cloudflare_tts_model": "@cf/myshell/melotts-v1",
-    "openai_tts_api_key": "",
-    "openai_tts_model": "tts-1",
-    "openai_tts_voice": "alloy"
+    "custom_base_url": "http://127.0.0.1:11434/v1",
+    "custom_model": "llama3.2:1b",
+    "anthropic_api_key": "",
+    "anthropic_model": "claude-3-5-haiku-latest",
+    "gemini_api_key": "",
+    "gemini_model": "gemini-2.0-flash",
+    "perplexity_api_key": "",
+    "perplexity_model": "sonar",
+    "together_api_key": "",
+    "together_model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    "cloudflare_account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID_HERE",
+    "cloudflare_api_token": "YOUR_CLOUDFLARE_API_TOKEN_HERE",
+    "cloudflare_model": "@cf/meta/llama-3.1-8b-instruct",
+    "extra_payload": {
+      "top_p": 0.9,
+      "presence_penalty": 0.1,
+      "repetition_penalty": 1.05
+    }
+  },
+  "stt": {
+    "provider": "cloudflare",
+    "api_key": "YOUR_CLOUDFLARE_API_TOKEN_HERE",
+    "account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID_HERE",
+    "model": "@cf/openai/whisper",
+    "language": "ru",
+    "openrouter_api_key": "YOUR_OPENROUTER_API_KEY_HERE",
+    "openrouter_model": "openai/whisper",
+    "openai_api_key": "",
+    "openai_model": "whisper-1",
+    "groq_api_key": "",
+    "groq_model": "whisper-large-v3-turbo",
+    "deepgram_api_key": "",
+    "deepgram_model": "nova-2",
+    "custom_url": "http://127.0.0.1:8080/v1/audio/transcriptions",
+    "extra_payload": {
+      "temperature": 0.0,
+      "response_format": "json"
+    }
+  },
+  "tts": {
+    "provider": "google",
+    "openrouter": {
+      "api_key": "YOUR_OPENROUTER_API_KEY_HERE",
+      "model": "openai/tts-1",
+      "voice": "alloy",
+      "extra_payload": {
+        "speed": 1.05
+      }
+    },
+    "elevenlabs": {
+      "api_key": "YOUR_ELEVENLABS_API_KEY_HERE",
+      "model_id": "eleven_multilingual_v2",
+      "voice_id": "21m00Tcm4TlvDq8ikWAM"
+    },
+    "cloudflare": {
+      "account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID_HERE",
+      "api_token": "YOUR_CLOUDFLARE_API_TOKEN_HERE",
+      "model": "@cf/myshell/melotts-v1",
+      "voice_id": "21m00Tcm4TlvDq8ikWAM",
+      "lang": "ru",
+      "extra_payload": {
+        "voice_id": "ru-female-1",
+        "speed": 1.0
+      }
+    },
+    "openai": {
+      "api_key": "",
+      "model": "tts-1",
+      "voice": "alloy"
+    },
+    "deepgram": {
+      "api_key": "",
+      "model": "aura-asteria-en"
+    },
+    "cartesia": {
+      "api_key": "",
+      "model_id": "sonic-multilingual",
+      "voice_id": "a0e998e3-182d-4f0d-9fb9-e82429f3303a"
+    },
+    "custom": {
+      "url": "http://127.0.0.1:5002/api/tts"
+    },
+    "extra_payload": {
+      "voice_id": "ru-female-1",
+      "sample_rate": 24000
+    }
+  },
+  "proxy": {
+    "enabled": false,
+    "socks5_url": "socks5://127.0.0.1:1080"
+  },
+  "audio": {
+    "initial_volume": 6,
+    "mixer_control_name": "TAS5805M Digital",
+    "alsa_card": "hw:0,0",
+    "record_device": "hw:0,1",
+    "sample_rate": 16000
+  },
+  "hardware": {
+    "input_event_device": "/dev/input/event1",
+    "led_rings_count": 3,
+    "led_sysfs_base": "/sys/class/leds"
+  }
 }

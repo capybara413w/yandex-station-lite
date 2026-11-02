@@ -1,9 +1,17 @@
 # API Keys and sensitive configs
 server/config.json
 server/api_*.txt
+*api*.txt
+station_config.json
 *.env
 *.key
 *.pem
+
+# Build artifacts
+node_modules/
+dist/
+target/
+station_daemon/target/
 
 # Audio cache and temporary media
 server/music_cache/
@@ -21,7 +29,12 @@ venv/
 .venv/
 env/
 
-# System and IDE
+# System, IDE and temporary files
 *.log
+*.pid
 .vscode/
 .idea/
+.aistudio/
+.gemini/
+.cargo/
+

@@ -1,53 +1,157 @@
-# Yandex Station Lite (v1) — Control Center (React + TypeScript)
+# yandex-station-lite
 
-Web Control Center and Local Bridge for **Yandex Station Lite (v1)** with software root access. Rewritten as a modern React SPA with TypeScript, Express API, Vite, live system console, media playback controls, ALSA/TAS5805M volume adjustment, and DeepSeek LLM assistant integration.
+> Автономный Rust-демон (`station_daemon`) и веб-центр управления для **Яндекс Станции Лайт v1** (платформа Amlogic A113X / AXG `aarch64-linux-musl`).
 
----
-
-## Features
-
-* **Player & Volume Control**:
-  * Real-time playback status tracking (Playing, Paused, Stopped).
-  * Fast playback controls (Play, Pause, Stop, Restart).
-  * Direct SoundCloud music search and streaming.
-  * Hardware logarithmic ALSA volume mapping for TAS5805M DAC chip (0–100%) with presets (Mute, 25%, 50%, 75%, 100%, +/- 10%).
-* **Live System Console**:
-  * Real-time log streamer with colored log levels (`INFO`, `WARNING`, `ERROR`).
-  * Autoscroll toggle and instant buffer clearing.
-* **DeepSeek LLM Assistant**:
-  * Configurable API key, model selection (`deepseek-chat` V3 / `deepseek-reasoner` R1), and custom prompt formatting.
-  * Real-time status badge indicator.
-* **Interactive LED Ring Preview**:
-  * Live visual RGB color emulation ring with glow and dynamic RGB code readout.
-* **Dialogue History**:
-  * Log table of STT requests, LLM answers, latency (ms), and LED states.
+Превращает Яндекс Станцию Лайт с root-доступом в полностью независимую смарт-колонку с локальным веб-интерфейсом, нейросетевым голосовым ассистентом, плеером SoundCloud/радио, управлением Wi-Fi / Bluetooth и аппаратной периферией — без зависимости от серверов Яндекса и процессов Квазара.
 
 ---
 
-## Tech Stack
+## 🌟 Основные возможности
 
-* **Frontend**: React 18, TypeScript, Vite.
-* **Backend**: Node.js, Express, TSX.
-* **Styling**: Native dark theme matching original Control Center specifications.
-* **Target Port**: 3000 (`0.0.0.0:3000`).
+### 1. Автономный демон на Rust (`station_daemon`)
+* Скомпилирован под целевую архитектуру `aarch64-unknown-linux-musl` для Amlogic A113X (Cortex-A53).
+* Потребляет всего **~70 МБ RAM** (из доступных 238 МБ), работает автономно в фоне под управлением `start-stop-daemon`.
+* Встроенный веб-сервер на базе **Axum / Tokio** (порт `5000`), не требующий сторонних рантаймов (Node.js/Python на колонке не нужны).
+
+### 2. Сетевое управление и исправление Wi-Fi (88x2cs)
+* **Wi-Fi модуль (wlan0 / wpa_supplicant)**:
+  * Просмотр статуса подключения (SSID, IP, уровень сигнала dBm, частота, BSSID).
+  * Сканирование доступных точек доступа и быстрое подключение.
+  * Перезапуск интерфейса в один клик.
+* **Отключение энергосбережения чипа Realtek RTL8822CS (`/sys/module/88x2cs/parameters/`)**:
+  * При отключении системных сервисов Квазара (`maind`, `quasar_launcher2`) модуль Wi-Fi по умолчанию переходит в агрессивный спящий режим и теряет сеть.
+  * В демон и скрипты встроен фикс критических параметров:
+    * `rtw_power_mgnt = 0` (выключение спящего режима).
+    * `rtw_ips_mode = 0` (отключение Inactive Power Saving).
+    * `rtw_smart_ps = 0` (отключение Smart Power Saving).
+  * Возможность просмотра и переключения параметров прямо из веб-интерфейса во вкладке «Настройки».
+* **Bluetooth (`hci0`)**:
+  * Включение/выключение адаптера через `hciconfig` / `rfkill`.
+  * Сканирование эфира и отображение найденных устройств.
+
+### 3. Нейросетевой ассистент (LLM, STT, TTS)
+Все настройки ассистента сгруппированы во вкладке **«Ассистент»**:
+* **LLM (Языковые модели)**:
+  * Поддержка **DeepSeek** (`deepseek-chat` V3 / `deepseek-reasoner` R1) — сверхбыстрый отклик (~1 сек) напрямую без блокировок.
+  * Поддержка **Cloudflare Workers AI** (`@cf/meta/llama-3.1-8b-instruct`).
+  * Поддержка **OpenRouter**, **Groq**, **OpenAI**, **Anthropic Claude**, **Google Gemini**, **Mistral**, а также локальных LLM (Ollama/LM Studio).
+  * Модель отвечает строго структурированным JSON: `{"text": "...", "color": [R, G, B], "action": "play"|"stop"|"resume"|"none", "song": "..."}` для одновременного управления подсветкой и музыкой.
+* **STT (Распознавание речи)**:
+  * Запись с микрофонной матрицы станции (`hw:0,1`, 16 кГц Linear PCM mono).
+  * Распознавание через **Cloudflare Workers AI Whisper** (`@cf/openai/whisper`), OpenRouter, OpenAI Whisper или локальный STT сервер.
+* **TTS (Синтез речи)**:
+  * **Google TTS** — встроенный бесплатный синтез русской речи с нулевой задержкой, не требующий API-ключей.
+  * Поддержка **ElevenLabs**, **Cloudflare MeloTTS**, **OpenAI TTS**, **Deepgram Aura**, **Cartesia Sonic**.
+  * Автоматический fallback на Google TTS в случае сбоя или сетевых ограничений сторонних провайдеров.
+
+### 4. Аппаратный контроль периферии
+* **ЦАП Texas Instruments TAS5805M**:
+  * Прямое логарифмическое управление громкостью через ALSA / I2C регистры.
+* **Сенсорные кнопки Cypress CY8CMBR3108 (`/dev/input/event1`)**:
+  * Громкость `+` / `-`.
+  * Короткий тап по центру: Play/Pause либо прерывание текущей речи ассистента.
+  * Долгое удержание центра (>700 мс): запуск голосового диалога (синяя подсветка -> запись 4 сек -> распознавание -> ответ).
+* **Светодиодное кольцо (3 зоны RGB)**:
+  * Управление через SysFS (`/sys/class/leds/micro:{red,green,blue}:ring{1,2,3}`).
+  * Плавная пульсация во время речи ассистента и анимация состояний.
+* **3-полосный реактивный светомузыкальный визуализатор (Lightshow)**:
+  * Анализ частот (НЧ, СЧ, ВЧ) в реальном времени под играющий трек.
 
 ---
 
-## Development
+## 📁 Структура проекта
 
-```bash
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-
-# Build for production
-npm run build
+```
+yandex-station-lite/
+├── install_station.bat       # Установщик в 1 клик через ADB
+├── config.json               # Шаблон конфигурации станции (LLM, STT, TTS, Audio, Network)
+├── package.json              # Зависимости React веб-интерфейса
+├── server.ts                 # Express сервер-мост (для локальной разработки UI на ПК)
+├── src/                      # Исходники фронтенда (React 18, TypeScript, Material 3 Dark UI)
+├── station/                  # Набор shell-скриптов для Станции
+│   ├── autostart.sh          # Скрипт автозагрузки в /data/autostart.sh
+│   ├── run_daemon.sh         # Запуск демона с перенаправлением логов
+│   ├── kill_and_wifi.sh      # Остановка Квазара и отключение энергосбережения 88x2cs
+│   ├── buttons_daemon.sh     # Демон аппаратных кнопок
+│   └── led.sh                # Управление сегментами LED-кольца
+├── station_daemon/           # Исходный код Rust-демона (Axum, Tokio, ALSA, SysFS)
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── main.rs           # Точка входа, инициализация подсистем и event loop
+│   │   ├── config.rs         # Модели конфигурации AppConfig
+│   │   ├── hardware/         # Модули TAS5805M, кнопок, светодиодов и сети (Wi-Fi/BT)
+│   │   ├── services/         # Сервисы DeepSeek, STT, TTS, Player, SoundCloud, Visualizer
+│   │   └── web/              # Axum HTTP роуты и embedded HTML интерфейс
+└── tools/                    # Локальные утилиты ADB для Windows
 ```
 
 ---
 
-## License
+## 🚀 Быстрый старт
 
-GNU General Public License v2.0 (GPLv2).
+### Требования
+1. **Яндекс Станция Лайт v1** с активированным ADB / root-доступом по Wi-Fi (порт `5555`).
+2. Компьютер в одной локальной сети со станцией.
+
+### Установка на Станцию (в один клик)
+Запустите файл:
+```bat
+install_station.bat
+```
+Установщик автоматически:
+1. Подключится к станции по ADB.
+2. Соберет или возьмет готовый бинарник `station_daemon`.
+3. Отправит бинарник и скрипты в раздел `/data`.
+4. Отключит Квазар, настроит параметры энергосбережения модуля 88x2cs и зафиксирует Wi-Fi.
+5. Настроит автозагрузку в `/etc/rc.local` и запустит автономный демон.
+
+---
+
+## 🌐 Использование веб-интерфейса
+
+После запуска веб-интерфейс доступен в браузере с любого устройства в домашней сети:
+```
+http://<IP_АДРЕС_СТАНЦИИ>:5000
+```
+*(например, `http://192.168.0.106:5000`)*
+
+### Вкладки интерфейса:
+1. **Плеер**: статус трека, воспроизведение SoundCloud / радиостанций, логарифмическая громкость, управление визуализатором.
+2. **Ассистент**: история диалогов, выбор LLM-провайдера (DeepSeek, Cloudflare, OpenRouter и др.), настройка STT и голоса TTS, изменение системного промпта.
+3. **Настройки**:
+   * Текущий статус Wi-Fi соединения, сканирование и подключение к новым сетям.
+   * Блок управления энергосбережением модуля **88x2cs** с кнопкой «⚡ Отключить всё энергосбережение».
+   * Статус Bluetooth-адаптера и сканирование устройств.
+   * Мониторинг RAM, Uptime, IP-адреса и системный терминал.
+
+---
+
+## 🛠 Ручная сборка station_daemon из исходников
+
+Для кросс-компиляции под Amlogic A113X (musl libc):
+```bash
+# В среде WSL или Linux с установленным rustup:
+rustup target add aarch64-unknown-linux-musl
+
+# Сборка release-версии:
+cd station_daemon
+cargo build --release --target aarch64-unknown-linux-musl
+```
+Бинарник появится в `station_daemon/target/aarch64-unknown-linux-musl/release/station_daemon`.
+
+---
+
+## 🔑 Конфигурация API ключей
+
+Файл конфигурации на станции расположен по пути `/data/config.json`. Внести ключи можно:
+1. Через веб-интерфейс во вкладке **«Ассистент»** (нажмите *«Сохранить настройки ассистента»*).
+2. Либо отредактировав `config.json` и отправив через ADB:
+   ```bash
+   adb push config.json /data/config.json
+   ```
+
+---
+
+## 📄 Лицензия
+
+Распространяется под лицензией **GNU General Public License v2.0 (GPLv2)**.
