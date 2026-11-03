@@ -100,7 +100,7 @@ const DEFAULT_CONFIG = {
   anthropic_api_key: '',
   anthropic_model: 'claude-3-5-haiku-latest',
   gemini_api_key: '',
-  gemini_model: 'gemini-2.0-flash',
+  gemini_model: 'gemini-3.5-flash',
   perplexity_api_key: '',
   perplexity_model: 'sonar',
   together_api_key: '',
@@ -430,7 +430,7 @@ async function callDeepSeek(prompt: string): Promise<{ data: any | null; error: 
     customHeaders['anthropic-version'] = '2023-06-01';
   } else if (provider === 'gemini') {
     apiKey = (CONFIG.gemini_api_key || '').trim();
-    modelName = CONFIG.gemini_model || 'gemini-2.0-flash';
+    modelName = CONFIG.gemini_model || 'gemini-3.5-flash';
     url = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
   } else if (provider === 'perplexity') {
     apiKey = (CONFIG.perplexity_api_key || '').trim();
@@ -908,6 +908,27 @@ app.get('/api/config/assistant', (_req: Request, res: Response) => {
     llmKey = CONFIG.custom_llm_api_key || '';
     llmModel = CONFIG.custom_llm_model || 'default';
     llmEndpointUrl = CONFIG.custom_llm_base_url || 'http://localhost:11434/v1';
+  } else if (llmProv === 'gemini') {
+    llmKey = CONFIG.gemini_api_key || '';
+    llmModel = CONFIG.gemini_model || 'gemini-flash-lite-latest';
+  } else if (llmProv === 'groq') {
+    llmKey = CONFIG.groq_api_key || '';
+    llmModel = CONFIG.groq_model || 'llama-3.3-70b-versatile';
+  } else if (llmProv === 'openai') {
+    llmKey = CONFIG.openai_api_key || '';
+    llmModel = CONFIG.openai_model || 'gpt-4o-mini';
+  } else if (llmProv === 'mistral') {
+    llmKey = CONFIG.mistral_api_key || '';
+    llmModel = CONFIG.mistral_model || 'mistral-small-latest';
+  } else if (llmProv === 'anthropic') {
+    llmKey = CONFIG.anthropic_api_key || '';
+    llmModel = CONFIG.anthropic_model || 'claude-3-5-haiku-latest';
+  } else if (llmProv === 'perplexity') {
+    llmKey = CONFIG.perplexity_api_key || '';
+    llmModel = CONFIG.perplexity_model || 'sonar';
+  } else if (llmProv === 'together') {
+    llmKey = CONFIG.together_api_key || '';
+    llmModel = CONFIG.together_model || 'meta-llama/Llama-3.3-70B-Instruct-Turbo';
   } else {
     llmKey = CONFIG.deepseek_api_key || '';
     llmModel = CONFIG.deepseek_model || 'deepseek-chat';
@@ -1024,12 +1045,26 @@ app.post('/api/config/assistant', async (req: Request, res: Response) => {
       if (CONFIG.llm_provider === 'openrouter') CONFIG.openrouter_model = m;
       else if (CONFIG.llm_provider === 'cloudflare') CONFIG.cloudflare_llm_model = m;
       else if (CONFIG.llm_provider === 'custom' || CONFIG.llm_provider === 'local') CONFIG.custom_llm_model = m;
+      else if (CONFIG.llm_provider === 'gemini') CONFIG.gemini_model = m;
+      else if (CONFIG.llm_provider === 'groq') CONFIG.groq_model = m;
+      else if (CONFIG.llm_provider === 'openai') CONFIG.openai_model = m;
+      else if (CONFIG.llm_provider === 'mistral') CONFIG.mistral_model = m;
+      else if (CONFIG.llm_provider === 'anthropic') CONFIG.anthropic_model = m;
+      else if (CONFIG.llm_provider === 'perplexity') CONFIG.perplexity_model = m;
+      else if (CONFIG.llm_provider === 'together') CONFIG.together_model = m;
       else CONFIG.deepseek_model = m;
     }
     if (body.llm.api_key && !String(body.llm.api_key).startsWith('*')) {
       const k = String(body.llm.api_key).trim();
       if (CONFIG.llm_provider === 'openrouter') CONFIG.openrouter_api_key = k;
       else if (CONFIG.llm_provider === 'cloudflare') CONFIG.cloudflare_llm_api_token = k;
+      else if (CONFIG.llm_provider === 'gemini') CONFIG.gemini_api_key = k;
+      else if (CONFIG.llm_provider === 'groq') CONFIG.groq_api_key = k;
+      else if (CONFIG.llm_provider === 'openai') CONFIG.openai_api_key = k;
+      else if (CONFIG.llm_provider === 'mistral') CONFIG.mistral_api_key = k;
+      else if (CONFIG.llm_provider === 'anthropic') CONFIG.anthropic_api_key = k;
+      else if (CONFIG.llm_provider === 'perplexity') CONFIG.perplexity_api_key = k;
+      else if (CONFIG.llm_provider === 'together') CONFIG.together_api_key = k;
       else CONFIG.deepseek_api_key = k;
     }
     if (body.llm.account_id) {

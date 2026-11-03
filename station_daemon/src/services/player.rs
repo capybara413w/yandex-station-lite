@@ -1,3 +1,4 @@
+use crate::config::AppConfig;
 use crate::hardware::LedController;
 use crate::services::soundcloud::SoundCloudService;
 use serde::{Deserialize, Serialize};
@@ -53,6 +54,7 @@ fn get_ffmpeg_bin() -> Option<&'static str> {
 }
 
 pub struct PlayerService {
+    config: Arc<RwLock<AppConfig>>,
     state: Arc<RwLock<PlaybackState>>,
     current_track: Arc<RwLock<String>>,
     current_artist: Arc<RwLock<String>>,
@@ -67,11 +69,12 @@ pub struct PlayerService {
 }
 
 impl PlayerService {
-    pub fn new() -> Self {
+    pub fn new(config: Arc<RwLock<AppConfig>>) -> Self {
         let _ = fs::remove_file("/tmp/music_playing");
         let _ = fs::remove_file("/tmp/music_paused");
 
         Self {
+            config,
             state: Arc::new(RwLock::new(PlaybackState::Stopped)),
             current_track: Arc::new(RwLock::new("Ожидание команды...".to_string())),
             current_artist: Arc::new(RwLock::new(String::new())),
@@ -136,14 +139,14 @@ impl PlayerService {
 
         // 1. Send SIGTERM first so decoders can close audio devices cleanly
         let _ = Command::new("killall")
-            .args(["-TERM", "mpg123", "ffmpeg"])
+            .args(["-TERM", "aplay", "mpg123", "ffmpeg"])
             .output();
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         // 2. Send SIGKILL to ensure no zombie or hung processes remain
         let _ = Command::new("killall")
-            .args(["-9", "mpg123", "ffmpeg", "play.sh"])
+            .args(["-9", "aplay", "mpg123", "ffmpeg", "play.sh", "curl"])
             .output();
 
         let _ = fs::remove_file("/tmp/music_paused");
@@ -221,8 +224,42 @@ impl PlayerService {
             return;
         }
 
-        // 1. Check if it's already an HTTP stream URL or well-known radio preset
-        if q.starts_with("http://") || q.starts_with("https://") {
+        // 1. If it's a SoundCloud permalink URL -> resolve via resolve_permalink!
+        if q.contains("soundcloud.com/") {
+            info!("Resolving SoundCloud permalink: '{}'", q);
+            led.blink(255, 120, 0, 150);
+            match soundcloud.resolve_permalink(q).await {
+                Ok(resolved) => {
+                    let dur_secs = resolved.duration_ms / 1000;
+                    info!(
+                        "Resolved SoundCloud URL: '{}' by '{}' (HLS: {}, duration: {}s)",
+                        resolved.track_title, resolved.artist, resolved.is_hls, dur_secs
+                    );
+                    self.play_direct_stream(
+                        &resolved.stream_url,
+                        &resolved.track_title,
+                        &resolved.artist,
+                        resolved.artwork_url,
+                        dur_secs,
+                        resolved.is_hls,
+                        0,
+                        led,
+                    )
+                    .await;
+                    return;
+                }
+                Err(e) => {
+                    warn!("Failed to resolve SoundCloud permalink '{}': {}", q, e);
+                }
+            }
+        }
+
+        // 2. If it's a YouTube URL -> do not pass raw HTML to mpg123
+        if q.contains("youtube.com/") || q.contains("youtu.be/") {
+            warn!("Raw YouTube URL received, resolving track audio via search: '{}'", q);
+            // Fall through to search below
+        } else if q.starts_with("http://") || q.starts_with("https://") {
+            // Direct audio stream URL (Radio, direct .mp3, etc.)
             self.play_direct_stream(q, q, "", None, 0, false, 0, led).await;
             return;
         }
@@ -386,23 +423,45 @@ impl PlayerService {
             || url.contains("/stream/hls")
             || url.contains("mpegurl");
 
+        let proxy_arg = {
+            let cfg = self.config.read().await;
+            if cfg.proxy.enabled && !cfg.proxy.socks5_url.is_empty() {
+                "-http_proxy http://127.0.0.1:8889 ".to_string()
+            } else {
+                String::new()
+            }
+        };
+
         tokio::task::spawn_blocking(move || {
             let spawn_start = Instant::now();
             let safe_url = url.replace('\'', "%27");
 
+            let has_aplay = Path::new("/usr/bin/aplay").exists() || Path::new("/opt/bin/aplay").exists();
+            let aplay_bin = if Path::new("/usr/bin/aplay").exists() {
+                "/usr/bin/aplay"
+            } else {
+                "aplay"
+            };
+
             // Build audio pipeline
-            // Note: On SoundCloud HLS (fragmented MP4 .m4s), passing -ss before -i causes ffmpeg to skip
-            // Build audio pipeline with simultaneous lightweight 8000Hz PCM UDP feed for 3-band LED visualizer
+            // If proxy is active, FFmpeg routes all HTTP/HLS segment requests through the local proxy bridge
+            // Output #0 pipes raw 48kHz stereo PCM directly into ALSA aplay (hw:0,0) with zero re-encoding overhead
+            // Output #1 simultaneously sends 16kHz mono PCM to UDP 127.0.0.1:7777 for the real-time LED visualizer
             let pipeline_cmd = if let Some(ffmpeg_bin) = ffmpeg_bin_opt {
-                if offset_secs > 0 {
+                let seek_arg = if offset_secs > 0 {
+                    format!("-ss {} ", offset_secs)
+                } else {
+                    String::new()
+                };
+                if has_aplay {
                     format!(
-                        "{} -nostdin -loglevel info -nostats -i '{}' -ss {} -f mp3 - -f s16le -ac 1 -ar 16000 'udp://127.0.0.1:7777?pkt_size=512' | {} -v -a hw:0,0 -f {} -",
-                        ffmpeg_bin, safe_url, offset_secs, mpg123_bin, scale
+                        "{} -user_agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' {}-nostdin -loglevel error -nostats -i '{}' {}-f s16le -ac 2 -ar 48000 - -f s16le -ac 1 -ar 16000 'udp://127.0.0.1:7777?pkt_size=512' | {} -D hw:0,0 -f S16_LE -c 2 -r 48000 -",
+                        ffmpeg_bin, proxy_arg, safe_url, seek_arg, aplay_bin
                     )
                 } else {
                     format!(
-                        "{} -nostdin -loglevel info -nostats -i '{}' -f mp3 - -f s16le -ac 1 -ar 16000 'udp://127.0.0.1:7777?pkt_size=512' | {} -v -a hw:0,0 -f {} -",
-                        ffmpeg_bin, safe_url, mpg123_bin, scale
+                        "{} -user_agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' {}-nostdin -loglevel error -nostats -i '{}' {}-f mp3 - -f s16le -ac 1 -ar 16000 'udp://127.0.0.1:7777?pkt_size=512' | {} -v -a hw:0,0 -f {} -",
+                        ffmpeg_bin, proxy_arg, safe_url, seek_arg, mpg123_bin, scale
                     )
                 }
             } else {

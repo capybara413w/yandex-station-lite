@@ -644,7 +644,51 @@ async fn soundcloud_play_handler(
     }
 
     let query = payload.song.unwrap_or_else(|| "Lofi chill beats".to_string());
-    if query.starts_with("http://") || query.starts_with("https://") {
+    if query.contains("soundcloud.com/") {
+        match state.soundcloud.resolve_permalink(&query).await {
+            Ok(stream) => {
+                let dur_secs = stream.duration_ms / 1000;
+                state
+                    .player
+                    .play_direct_stream(
+                        &stream.stream_url,
+                        &stream.track_title,
+                        &stream.artist,
+                        stream.artwork_url,
+                        dur_secs,
+                        stream.is_hls,
+                        0,
+                        &state.led,
+                    )
+                    .await;
+                state
+                    .logs
+                    .push(
+                        "INFO",
+                        &format!("SoundCloud: запущен трек по ссылке '{}'", stream.track_title),
+                    )
+                    .await;
+                return (
+                    StatusCode::OK,
+                    Json(serde_json::json!({
+                        "success": true,
+                        "track": stream.track_title,
+                        "artist": stream.artist,
+                        "state": "playing"
+                    })),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                warn!("Failed to resolve SoundCloud permalink '{}': {}", query, e);
+            }
+        }
+    }
+
+    if (query.starts_with("http://") || query.starts_with("https://"))
+        && !query.contains("youtube.com/")
+        && !query.contains("youtu.be/")
+    {
         state
             .player
             .play_direct_stream(
@@ -1068,6 +1112,104 @@ async fn get_assistant_config_handler(State(state): State<AppState>) -> impl Int
             None,
             Some(cfg.deepseek.custom_base_url.clone()),
         ),
+        "gemini" => (
+            if !cfg.deepseek.gemini_api_key.is_empty() {
+                cfg.deepseek.gemini_api_key.as_str()
+            } else {
+                cfg.deepseek.api_key.as_str()
+            },
+            if !cfg.deepseek.gemini_model.is_empty() {
+                cfg.deepseek.gemini_model.clone()
+            } else {
+                "gemini-flash-lite-latest".to_string()
+            },
+            None,
+            None,
+        ),
+        "groq" => (
+            if !cfg.deepseek.groq_api_key.is_empty() {
+                cfg.deepseek.groq_api_key.as_str()
+            } else {
+                cfg.deepseek.api_key.as_str()
+            },
+            if !cfg.deepseek.groq_model.is_empty() {
+                cfg.deepseek.groq_model.clone()
+            } else {
+                "llama-3.3-70b-versatile".to_string()
+            },
+            None,
+            None,
+        ),
+        "openai" => (
+            if !cfg.deepseek.openai_api_key.is_empty() {
+                cfg.deepseek.openai_api_key.as_str()
+            } else {
+                cfg.deepseek.api_key.as_str()
+            },
+            if !cfg.deepseek.openai_model.is_empty() {
+                cfg.deepseek.openai_model.clone()
+            } else {
+                "gpt-4o-mini".to_string()
+            },
+            None,
+            None,
+        ),
+        "mistral" => (
+            if !cfg.deepseek.mistral_api_key.is_empty() {
+                cfg.deepseek.mistral_api_key.as_str()
+            } else {
+                cfg.deepseek.api_key.as_str()
+            },
+            if !cfg.deepseek.mistral_model.is_empty() {
+                cfg.deepseek.mistral_model.clone()
+            } else {
+                "mistral-small-latest".to_string()
+            },
+            None,
+            None,
+        ),
+        "anthropic" => (
+            if !cfg.deepseek.anthropic_api_key.is_empty() {
+                cfg.deepseek.anthropic_api_key.as_str()
+            } else {
+                cfg.deepseek.api_key.as_str()
+            },
+            if !cfg.deepseek.anthropic_model.is_empty() {
+                cfg.deepseek.anthropic_model.clone()
+            } else {
+                "claude-3-5-haiku-latest".to_string()
+            },
+            None,
+            None,
+        ),
+        "perplexity" => (
+            if !cfg.deepseek.perplexity_api_key.is_empty() {
+                cfg.deepseek.perplexity_api_key.as_str()
+            } else {
+                cfg.deepseek.api_key.as_str()
+            },
+            if !cfg.deepseek.perplexity_model.is_empty() {
+                cfg.deepseek.perplexity_model.clone()
+            } else {
+                "sonar".to_string()
+            },
+            None,
+            None,
+        ),
+        "together" => (
+            if !cfg.deepseek.together_api_key.is_empty() {
+                cfg.deepseek.together_api_key.as_str()
+            } else {
+                cfg.deepseek.api_key.as_str()
+            },
+            if !cfg.deepseek.together_model.is_empty() {
+                cfg.deepseek.together_model.clone()
+            } else {
+                "meta-llama/Llama-3.3-70B-Instruct-Turbo".to_string()
+            },
+            None,
+            None,
+        ),
         _ => (
             cfg.deepseek.api_key.as_str(),
             cfg.deepseek.model.clone(),
@@ -1272,6 +1414,13 @@ async fn post_assistant_config_handler(
                     "openrouter" => cfg.deepseek.openrouter_model = m_clean.to_string(),
                     "cloudflare" => cfg.deepseek.cloudflare_model = m_clean.to_string(),
                     "custom" | "local" => cfg.deepseek.custom_model = m_clean.to_string(),
+                    "gemini" => cfg.deepseek.gemini_model = m_clean.to_string(),
+                    "groq" => cfg.deepseek.groq_model = m_clean.to_string(),
+                    "openai" => cfg.deepseek.openai_model = m_clean.to_string(),
+                    "mistral" => cfg.deepseek.mistral_model = m_clean.to_string(),
+                    "anthropic" => cfg.deepseek.anthropic_model = m_clean.to_string(),
+                    "perplexity" => cfg.deepseek.perplexity_model = m_clean.to_string(),
+                    "together" => cfg.deepseek.together_model = m_clean.to_string(),
                     _ => cfg.deepseek.model = m_clean.to_string(),
                 }
             }
@@ -1282,6 +1431,13 @@ async fn post_assistant_config_handler(
                 match cfg.deepseek.provider.as_str() {
                     "openrouter" => cfg.deepseek.openrouter_api_key = k_clean.to_string(),
                     "cloudflare" => cfg.deepseek.cloudflare_api_token = k_clean.to_string(),
+                    "gemini" => cfg.deepseek.gemini_api_key = k_clean.to_string(),
+                    "groq" => cfg.deepseek.groq_api_key = k_clean.to_string(),
+                    "openai" => cfg.deepseek.openai_api_key = k_clean.to_string(),
+                    "mistral" => cfg.deepseek.mistral_api_key = k_clean.to_string(),
+                    "anthropic" => cfg.deepseek.anthropic_api_key = k_clean.to_string(),
+                    "perplexity" => cfg.deepseek.perplexity_api_key = k_clean.to_string(),
+                    "together" => cfg.deepseek.together_api_key = k_clean.to_string(),
                     _ => cfg.deepseek.api_key = k_clean.to_string(),
                 }
             }

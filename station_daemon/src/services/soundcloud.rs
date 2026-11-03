@@ -41,6 +41,30 @@ pub struct ResolvedStream {
     pub duration_ms: u64,
 }
 
+fn clean_yt_artist_string(raw: &str) -> String {
+    let mut parts = Vec::new();
+    for p in raw.split('•') {
+        let trimmed = p.trim();
+        let lower = trimmed.to_lowercase();
+        if trimmed.is_empty()
+            || lower.contains("view")
+            || lower.contains("просмотр")
+            || lower.contains(':')
+            || lower == "video"
+            || lower == "song"
+            || lower == "track"
+        {
+            continue;
+        }
+        parts.push(trimmed);
+    }
+    if parts.is_empty() {
+        "YouTube Music".to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
 pub struct SoundCloudService {
     config: Arc<RwLock<AppConfig>>,
     client_id: Arc<RwLock<String>>,
@@ -382,7 +406,7 @@ impl SoundCloudService {
                             .join("")
                     })
                     .unwrap_or_default();
-                let clean_sub = sub.trim_start_matches("Song • ").trim_start_matches("Track • ").to_string();
+                let clean_sub = clean_yt_artist_string(&sub);
                 let vid = card
                     .pointer("/onTap/watchEndpoint/videoId")
                     .or_else(|| card.pointer("/buttons/0/buttonRenderer/command/watchEndpoint/videoId"))
@@ -444,7 +468,7 @@ impl SoundCloudService {
                                 .join("")
                         })
                         .unwrap_or_default();
-                    let clean_artist = artist.trim_start_matches("Song • ").trim_start_matches("Track • ").to_string();
+                    let clean_artist = clean_yt_artist_string(&artist);
 
                     let thumb = item
                         .pointer("/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails")
@@ -681,6 +705,47 @@ impl SoundCloudService {
             .await
             .map_err(|e| format!("SoundCloud JSON error: {}", e))?;
 
+        Self::extract_stream_from_track(&track, cid.as_str(), &client).await
+    }
+
+    /// Resolves stream for a SoundCloud track by its permalink URL (e.g. https://soundcloud.com/artist/title)
+    pub async fn resolve_permalink(&self, permalink_url: &str) -> Result<ResolvedStream, String> {
+        let client = self.build_client().await;
+        let cid = self.get_client_id().await;
+        let resolve_url = format!(
+            "https://api-v2.soundcloud.com/resolve?url={}&client_id={}",
+            urlencoding::encode(permalink_url),
+            cid
+        );
+
+        let res = client
+            .get(&resolve_url)
+            .header("Accept", "application/json, text/javascript, */*; q=0.01")
+            .header("Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7")
+            .header("Origin", "https://soundcloud.com")
+            .header("Referer", "https://soundcloud.com/")
+            .send()
+            .await
+            .map_err(|e| format!("SoundCloud resolve error: {}", e))?;
+
+        if !res.status().is_success() {
+            return Err(format!("SoundCloud resolve HTTP {}", res.status()));
+        }
+
+        let track: serde_json::Value = res
+            .json()
+            .await
+            .map_err(|e| format!("SoundCloud JSON error: {}", e))?;
+
+        Self::extract_stream_from_track(&track, cid.as_str(), &client).await
+    }
+
+    /// Helper to extract progressive MP3 or HLS stream from a SoundCloud track object
+    pub async fn extract_stream_from_track(
+        track: &serde_json::Value,
+        cid: &str,
+        client: &Client,
+    ) -> Result<ResolvedStream, String> {
         let title = track["title"].as_str().unwrap_or("SoundCloud Track").to_string();
         let artist = track["user"]["username"].as_str().unwrap_or("").to_string();
         let artwork_url = track["artwork_url"].as_str().map(|s| s.to_string());
@@ -758,6 +823,27 @@ impl SoundCloudService {
             }
         }
 
-        Err(format!("Track {} has no accessible streams", track_id))
+        Err(format!("Track '{}' has no accessible audio streams", title))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_ytmusic_search() {
+        let mut cfg = AppConfig::default();
+        cfg.proxy.enabled = true;
+        cfg.proxy.socks5_url = "socks5://station:kiserStation2026@13.141.51.5:31080".to_string();
+        let svc = SoundCloudService::new(Arc::new(RwLock::new(cfg)));
+        let res = svc.search_ytmusic_tracks("Linkin Park Numb", 5).await;
+        println!("search_ytmusic_tracks result: {:?}", res);
+        assert!(res.is_ok());
+        let tracks = res.unwrap();
+        println!("tracks count: {}", tracks.len());
+        for t in &tracks {
+            println!("- {} by {}", t.title, t.artist);
+        }
     }
 }

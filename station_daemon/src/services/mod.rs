@@ -1,6 +1,7 @@
 pub mod clients;
 pub mod deepseek;
 pub mod player;
+pub mod proxy_bridge;
 pub mod soundcloud;
 pub mod stt;
 pub mod tts;
@@ -13,6 +14,7 @@ pub use clients::{
 };
 pub use deepseek::DeepSeekService;
 pub use player::{PlaybackState, PlayerService};
+pub use proxy_bridge::ProxyBridge;
 pub use soundcloud::SoundCloudService;
 pub use stt::SttService;
 pub use tts::TtsService;

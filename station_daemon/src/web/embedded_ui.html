@@ -1700,7 +1700,8 @@
             grid.innerHTML = '<div style="color: #a49ea8; padding: 12px;">Треки не найдены. Попробуйте другой запрос или источник.</div>';
             return;
           }
-          grid.innerHTML = items.map(t => {
+          window.stationSearchResults = items;
+          grid.innerHTML = items.map((t, idx) => {
             const src = t.source || 'ytmusic';
             let badgeBg = 'rgba(255, 78, 69, 0.14)';
             let badgeColor = '#ff4e45';
@@ -1715,7 +1716,6 @@
               badgeLabel = 'Радио';
             }
 
-            const playTarget = (t.permalink_url || t.stream_url || t.title).replace(/'/g, "\\'");
             const artworkImg = t.artwork_url 
               ? `<img src="${t.artwork_url}" style="width: 44px; height: 44px; border-radius: 10px; object-fit: cover; flex-shrink: 0;" onerror="this.style.display='none'"/>` 
               : `<div style="width: 44px; height: 44px; border-radius: 10px; background: #28252e; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 22px;">music_note</span></div>`;
@@ -1732,7 +1732,7 @@
                     </div>
                   </div>
                 </div>
-                <button type="button" class="m3-btn m3-btn-primary" style="padding: 7px 16px; font-size: 0.78rem; flex-shrink: 0;" onclick="playSong('${playTarget}')">
+                <button type="button" class="m3-btn m3-btn-primary" style="padding: 7px 16px; font-size: 0.78rem; flex-shrink: 0;" onclick="playSongByIndex(${idx})">
                   <span class="material-symbols-rounded" style="font-size: 16px;">play_arrow</span>
                   <span>Слушать</span>
                 </button>
@@ -1747,13 +1747,37 @@
       }
     }
 
-    async function playSong(query) {
+    function playSongByIndex(idx) {
+      const items = window.stationSearchResults || [];
+      const t = items[idx];
+      if (!t) return;
+      const src = t.source || 'ytmusic';
+      let playTarget = t.title || '';
+      const cleanArtist = (t.artist || '').split('•')[0].replace(/Video|Song|Track|\d+(\.\d+)?[MK]? views|\d+:\d+/gi, '').trim();
+      if (cleanArtist && cleanArtist !== 'Unknown Artist' && cleanArtist !== 'YouTube Music') {
+        playTarget += ' ' + cleanArtist;
+      }
+      if (src === 'radio' && t.stream_url) {
+        playTarget = t.stream_url;
+      }
+      playSong(playTarget, t.id, src);
+    }
+
+    async function playSong(query, trackId, source) {
       try {
-        await fetch('/api/player/play_song', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ song: query })
-        });
+        if (source === 'soundcloud' && trackId && trackId > 0) {
+          await fetch('/api/soundcloud/play', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_id: Number(trackId), song: query })
+          });
+        } else {
+          await fetch('/api/player/play_song', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ song: query })
+          });
+        }
         fetchStatus();
       } catch {}
     }
@@ -1788,12 +1812,17 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ prompt: q, speak: true })
         });
+        const d = await res.json().catch(() => ({}));
         if (res.ok) {
-          const d = await res.json();
           document.getElementById('quickAskResponse').innerText = d.text || 'Команда выполнена';
+          if (Array.isArray(d.color) && d.color.length === 3) {
+            document.getElementById('ledRingOuter').style.background = `rgb(${d.color[0]}, ${d.color[1]}, ${d.color[2]})`;
+          }
+        } else {
+          document.getElementById('quickAskResponse').innerText = 'Ошибка: ' + (d.error || d.text || ('HTTP ' + res.status));
         }
-      } catch {
-        document.getElementById('quickAskResponse').innerText = 'Ошибка связи с демоном Станции';
+      } catch (e) {
+        document.getElementById('quickAskResponse').innerText = 'Ошибка связи с демоном Станции: ' + e.message;
       }
     }
 
@@ -1871,8 +1900,80 @@
 
     function syncProvider(stage, val) {
       if (stage === 'tts') document.getElementById('cfgTtsProvider').value = val;
-      if (stage === 'llm') document.getElementById('cfgLlmProvider').value = val;
       if (stage === 'stt') document.getElementById('cfgSttProvider').value = val;
+      if (stage === 'llm') {
+        document.getElementById('cfgLlmProvider').value = val;
+        const modelInput = document.getElementById('cfgLlmModel');
+        const keyInput = document.getElementById('cfgLlmKey');
+        if (val === 'gemini') {
+          if (!modelInput.value || modelInput.value.includes('deepseek') || modelInput.value.includes('2.0')) modelInput.value = 'gemini-flash-lite-latest';
+          keyInput.placeholder = 'AIzaSy... / AQ...';
+        } else if (val === 'openrouter') {
+          if (!modelInput.value || modelInput.value.includes('gemini-flash')) modelInput.value = 'deepseek/deepseek-chat';
+          keyInput.placeholder = 'sk-or-v1-...';
+        } else if (val === 'groq') {
+          if (!modelInput.value || modelInput.value.includes('deepseek')) modelInput.value = 'llama-3.3-70b-versatile';
+          keyInput.placeholder = 'gsk_...';
+        } else if (val === 'openai') {
+          if (!modelInput.value || modelInput.value.includes('deepseek')) modelInput.value = 'gpt-4o-mini';
+          keyInput.placeholder = 'sk-...';
+        }
+      }
+    }
+
+    async function loadAssistantConfig() {
+      try {
+        const res = await fetch('/api/config/assistant');
+        if (!res.ok) return;
+        const d = await res.json();
+        if (d.llm) {
+          if (d.llm.provider) {
+            document.getElementById('quickLlm').value = d.llm.provider;
+            document.getElementById('cfgLlmProvider').value = d.llm.provider;
+          }
+          if (d.llm.model) {
+            document.getElementById('cfgLlmModel').value = d.llm.model;
+          }
+          if (d.llm.api_key && !d.llm.api_key.startsWith('***')) {
+            document.getElementById('cfgLlmKey').value = d.llm.api_key;
+          }
+          if (d.llm.extra_payload) {
+            document.getElementById('cfgLlmExtra').value = JSON.stringify(d.llm.extra_payload);
+          }
+        }
+        if (d.stt) {
+          if (d.stt.provider) {
+            document.getElementById('quickStt').value = d.stt.provider;
+            document.getElementById('cfgSttProvider').value = d.stt.provider;
+          }
+          if (d.stt.account_id) {
+            document.getElementById('cfgCfAccount').value = d.stt.account_id;
+          }
+          if (d.stt.api_key && !d.stt.api_key.startsWith('***')) {
+            document.getElementById('cfgSttKey').value = d.stt.api_key;
+          }
+          if (d.stt.extra_payload) {
+            document.getElementById('cfgSttExtra').value = JSON.stringify(d.stt.extra_payload);
+          }
+        }
+        if (d.tts) {
+          if (d.tts.provider) {
+            document.getElementById('quickTts').value = d.tts.provider;
+            document.getElementById('cfgTtsProvider').value = d.tts.provider;
+          }
+          if (d.tts.model) {
+            document.getElementById('cfgTtsModel').value = d.tts.model;
+          }
+          if (d.tts.extra_payload) {
+            document.getElementById('cfgTtsExtra').value = JSON.stringify(d.tts.extra_payload);
+          }
+        }
+        if (d.system_prompt) {
+          document.getElementById('sysPrompt').value = d.system_prompt;
+        }
+      } catch (e) {
+        console.error('Failed to load assistant config', e);
+      }
     }
 
     async function saveConfigAll() {
@@ -2228,8 +2329,9 @@
       }
     }
 
-    // Auto refresh status every 4 seconds
+    // Auto refresh status and load config
     fetchStatus();
+    loadAssistantConfig();
     setInterval(fetchStatus, 4000);
   </script>
 </body>

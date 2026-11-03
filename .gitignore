@@ -1,4 +1,4 @@
-# API Keys and sensitive configs
+# API Keys, secrets and sensitive configs
 server/config.json
 server/api_*.txt
 *api*.txt
@@ -6,12 +6,23 @@ station_config.json
 *.env
 *.key
 *.pem
+account_tokens.json
+tokens.json
+session.json
 
-# Build artifacts
+# Build artifacts and dependencies
 node_modules/
 dist/
 target/
 station_daemon/target/
+station_daemon/.cargo/
+
+# Packages and archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.part
 
 # Audio cache and temporary media
 server/music_cache/
@@ -32,10 +43,17 @@ env/
 # System, IDE and temporary files
 *.log
 *.pid
-*.zip
 .vscode/
 .idea/
 .aistudio/
 .gemini/
-.cargo/
+.system_generated/
+scratch/
+*.bak
+*.swp
+*~
 
+# Third-party runtime / state directories
+spotiya/
+receiver-state/
+playplay/

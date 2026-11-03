@@ -202,7 +202,7 @@ export default function App() {
   const [anthropicKeyInput, setAnthropicKeyInput] = useState('');
   const [anthropicModelInput, setAnthropicModelInput] = useState('claude-3-5-haiku-latest');
   const [geminiKeyInput, setGeminiKeyInput] = useState('');
-  const [geminiModelInput, setGeminiModelInput] = useState('gemini-2.0-flash');
+  const [geminiModelInput, setGeminiModelInput] = useState('gemini-3.5-flash');
   const [perplexityKeyInput, setPerplexityKeyInput] = useState('');
   const [perplexityModelInput, setPerplexityModelInput] = useState('sonar');
   const [togetherKeyInput, setTogetherKeyInput] = useState('');
@@ -887,11 +887,48 @@ export default function App() {
       });
 
       // 2. Structured assistant config format for Rust station_daemon
+      let activeLlmModel = 'deepseek/deepseek-chat';
+      let activeLlmKey = '';
+      if (payload.llm_provider === 'gemini') {
+        activeLlmModel = payload.gemini_model || 'gemini-flash-lite-latest';
+        activeLlmKey = payload.gemini_api_key || '';
+      } else if (payload.llm_provider === 'openrouter') {
+        activeLlmModel = payload.openrouter_model || 'deepseek/deepseek-chat';
+        activeLlmKey = payload.openrouter_api_key || '';
+      } else if (payload.llm_provider === 'groq') {
+        activeLlmModel = payload.groq_model || 'llama-3.3-70b-versatile';
+        activeLlmKey = payload.groq_api_key || '';
+      } else if (payload.llm_provider === 'openai') {
+        activeLlmModel = payload.openai_model || 'gpt-4o-mini';
+        activeLlmKey = payload.openai_api_key || '';
+      } else if (payload.llm_provider === 'mistral') {
+        activeLlmModel = payload.mistral_model || 'mistral-small-latest';
+        activeLlmKey = payload.mistral_api_key || '';
+      } else if (payload.llm_provider === 'anthropic') {
+        activeLlmModel = payload.anthropic_model || 'claude-3-5-haiku-latest';
+        activeLlmKey = payload.anthropic_api_key || '';
+      } else if (payload.llm_provider === 'perplexity') {
+        activeLlmModel = payload.perplexity_model || 'sonar';
+        activeLlmKey = payload.perplexity_api_key || '';
+      } else if (payload.llm_provider === 'together') {
+        activeLlmModel = payload.together_model || 'meta-llama/Llama-3.3-70B-Instruct-Turbo';
+        activeLlmKey = payload.together_api_key || '';
+      } else if (payload.llm_provider === 'cloudflare') {
+        activeLlmModel = payload.cloudflare_llm_model || '@cf/meta/llama-3.1-8b-instruct';
+        activeLlmKey = payload.cloudflare_api_token || payload.cloudflare_api_key || '';
+      } else if (payload.llm_provider === 'custom' || payload.llm_provider === 'local') {
+        activeLlmModel = payload.custom_llm_model || 'llama3.2:1b';
+        activeLlmKey = payload.custom_llm_api_key || '';
+      } else {
+        activeLlmModel = payload.deepseek_model || 'deepseek-chat';
+        activeLlmKey = payload.deepseek_api_key || '';
+      }
+
       const rustAssistantPayload = {
         llm: {
           provider: payload.llm_provider || 'openrouter',
-          model: payload.openrouter_model || payload.deepseek_model || payload.cloudflare_llm_model || 'deepseek/deepseek-chat',
-          api_key: payload.openrouter_api_key || payload.deepseek_api_key || '',
+          model: activeLlmModel,
+          api_key: activeLlmKey,
           extra_payload: payload.openrouter_llm_extra_payload || payload.cloudflare_llm_extra_payload || null,
         },
         stt: {
@@ -1750,7 +1787,12 @@ export default function App() {
                           type="button"
                           className="m3-btn m3-btn-primary"
                           style={{ padding: '6px 14px', fontSize: '0.78rem' }}
-                          onClick={() => handlePlaySong(t.permalink_url || t.url || `${t.artist ? t.artist + ' ' : ''}${t.title}`)}
+                          onClick={() => {
+                            const target = (t.source === 'radio' && (t.stream_url || t.url)) 
+                              ? (t.stream_url || t.url) 
+                              : `${t.title} ${t.artist || ''}`.trim();
+                            handlePlaySong(target);
+                          }}
                         >
                           <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>play_arrow</span>
                           <span>Play</span>
@@ -1912,7 +1954,7 @@ export default function App() {
                   <option value="openai">🤖 OpenAI Direct (GPT-4o Mini, GPT-4o)</option>
                   <option value="mistral">🇫🇷 Mistral AI (Mistral Small, Large)</option>
                   <option value="anthropic">🧠 Anthropic Claude (Claude 3.5 Sonnet, Haiku)</option>
-                  <option value="gemini">✨ Google Gemini Direct (Gemini 2.0 Flash)</option>
+                  <option value="gemini">✨ Google Gemini Direct (Gemini 3.5 Flash)</option>
                   <option value="perplexity">🔎 Perplexity AI (Sonar)</option>
                   <option value="together">🤝 Together AI (DeepSeek R1, Llama 3.3)</option>
                   <option value="deepseek">🐳 DeepSeek Direct (api.deepseek.com)</option>
@@ -1938,7 +1980,7 @@ export default function App() {
                     <input
                       type="text"
                       className="m3-input"
-                      placeholder="deepseek/deepseek-chat или google/gemini-2.0-flash-exp:free"
+                      placeholder="deepseek/deepseek-chat или google/gemini-2.5-flash"
                       value={openrouterModelInput}
                       onChange={(e) => setOpenrouterModelInput(e.target.value)}
                     />

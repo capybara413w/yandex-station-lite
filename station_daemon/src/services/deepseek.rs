@@ -23,7 +23,7 @@ pub struct DeepSeekService {
 
 impl DeepSeekService {
     pub fn new(config: Arc<RwLock<AppConfig>>, proxy: &ProxyConfig) -> Self {
-        let mut builder = Client::builder().timeout(std::time::Duration::from_secs(25));
+        let mut builder = Client::builder().timeout(std::time::Duration::from_secs(45));
 
         if proxy.enabled && !proxy.socks5_url.is_empty() {
             match reqwest::Proxy::all(&proxy.socks5_url) {
@@ -142,11 +142,15 @@ impl DeepSeekService {
                     },
                 ),
                 "gemini" => (
-                    cfg.deepseek.gemini_api_key.clone(),
+                    if !cfg.deepseek.gemini_api_key.is_empty() {
+                        cfg.deepseek.gemini_api_key.clone()
+                    } else {
+                        cfg.deepseek.api_key.clone()
+                    },
                     if !cfg.deepseek.gemini_model.is_empty() {
                         cfg.deepseek.gemini_model.clone()
                     } else {
-                        "gemini-2.0-flash".to_string()
+                        "gemini-3.5-flash".to_string()
                     },
                 ),
                 "perplexity" => (
@@ -345,7 +349,7 @@ impl DeepSeekService {
                                 val["choices"][0]["message"]["content"].as_str().unwrap_or("{}")
                             };
                             info!("LLM [{}] raw content (retry without response_format): {}", provider, content);
-                            return Ok(self.parse_json_or_fallback(content, prompt));
+                            return Ok(crate::services::clients::parse_clean_json_response(content, prompt));
                         }
                     }
                 }
@@ -367,7 +371,7 @@ impl DeepSeekService {
                 .unwrap_or("{}")
         };
         info!("LLM [{}] raw content: {}", provider, content);
-        Ok(self.parse_json_or_fallback(content, prompt))
+        Ok(crate::services::clients::parse_clean_json_response(content, prompt))
     }
 
     fn parse_json_or_fallback(&self, content: &str, prompt: &str) -> DeepSeekResponse {

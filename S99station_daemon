@@ -1,0 +1,52 @@
+#!/bin/sh
+
+case "$1" in
+    start)
+        # 1. Overcommit memory
+        echo 1 > /proc/sys/vm/overcommit_memory
+
+        # 2. Guarantee network ADB is running on port 5555
+        if ! pidof adbd > /dev/null; then
+            start-stop-daemon -S -b -x adbd
+        fi
+
+        # 3. Kill any quasar remnants
+        killall -9 maind quasar_launcher2 updatesd mediad telemetry fluent-bitd 2>/dev/null
+
+        # 4. Disable Wi-Fi 88x2cs power saving to keep link 100% stable
+        if [ -d /sys/module/88x2cs/parameters ]; then
+            echo 0 > /sys/module/88x2cs/parameters/rtw_power_mgnt 2>/dev/null
+            echo 0 > /sys/module/88x2cs/parameters/rtw_ips_mode 2>/dev/null
+            echo 0 > /sys/module/88x2cs/parameters/rtw_smart_ps 2>/dev/null
+            [ -f /sys/module/88x2cs/parameters/rtw_lps_mode ] && echo 0 > /sys/module/88x2cs/parameters/rtw_lps_mode 2>/dev/null
+            [ -f /sys/module/88x2cs/parameters/rtw_low_power ] && echo 0 > /sys/module/88x2cs/parameters/rtw_low_power 2>/dev/null
+        fi
+
+        # 5. Bind-mount Entware (/opt)
+        if [ ! -d "/opt/bin" ] && [ -d "/data/opt" ]; then
+            mount -o bind /data/opt /opt 2>/dev/null
+        fi
+
+        # 6. Play cyber boot animation and startup chime
+        if [ -x /data/boot_animation.sh ]; then
+            (/data/boot_animation.sh &)
+        fi
+        if [ -x /opt/bin/mpg123 ] && [ -f /data/boot_sound.mp3 ]; then
+            (/opt/bin/mpg123 -q -a hw:0,0 /data/boot_sound.mp3 &)
+        fi
+
+        # 7. Launch autonomous station_daemon
+        if [ -x /data/station_daemon ]; then
+            start-stop-daemon -S -b -x /data/station_daemon -m -p /tmp/station_daemon.pid -- 2>/dev/null || \
+            (nohup /data/station_daemon >/tmp/station_daemon.log 2>&1 &)
+        fi
+        ;;
+    stop)
+        killall -9 station_daemon 2>/dev/null
+        ;;
+    *)
+        echo "Usage: $0 {start|stop}"
+        exit 1
+        ;;
+esac
+exit 0

@@ -8,7 +8,8 @@ use hardware::{
     AudioHardware, ButtonsListener, LedController, NetworkHardware, StationButtonEvent,
 };
 use services::{
-    DeepSeekService, PlayerService, SoundCloudService, SttService, TtsService, VisualizerService,
+    DeepSeekService, PlayerService, ProxyBridge, SoundCloudService, SttService, TtsService,
+    VisualizerService,
 };
 use std::net::SocketAddr;
 use std::path::Path;
@@ -68,7 +69,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Arc::new(tokio::sync::RwLock::new(initial_config.clone()));
     let logs = Arc::new(web::LogBuffer::new());
 
-    // 4. Initialize Core Native Services (Player, SoundCloud, STT, DeepSeek, Native TTS)
+    // 4. Initialize Core Native Services (Player, SoundCloud, STT, DeepSeek, Native TTS, Proxy Bridge)
+    let proxy_bridge = Arc::new(ProxyBridge::new(config.clone()));
+    proxy_bridge.start(8889);
+
     let deepseek = Arc::new(DeepSeekService::new(config.clone(), &initial_config.proxy));
     let soundcloud = Arc::new(SoundCloudService::new(config.clone()));
     let stt = Arc::new(SttService::new(
@@ -77,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         initial_config.stt.clone(),
         &initial_config.proxy,
     ));
-    let player = Arc::new(PlayerService::new());
+    let player = Arc::new(PlayerService::new(config.clone()));
     let tts = Arc::new(TtsService::new(config.clone(), &initial_config.proxy));
     let visualizer = Arc::new(VisualizerService::new(&initial_config.hardware.led_sysfs_base));
     visualizer.clone().start(tts.clone());

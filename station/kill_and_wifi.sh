@@ -1,6 +1,6 @@
 #!/bin/sh
 
-echo "Останавливаем сервисы Квазара..."
+echo "Гасим остатки старых сервисов..."
 killall -9 maind quasar_launcher2 rootkeeper.sh 2>/dev/null
 
 echo "Отключаем энергосбережение модуля Wi-Fi 88x2cs (защита от падения линка)..."
@@ -20,8 +20,7 @@ ifconfig wlan0 up 2>/dev/null
 if ! pidof wpa_supplicant > /dev/null; then
     echo "Перезапуск wpa_supplicant..."
     wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant.conf 2>/dev/null || \
-    wpa_supplicant -B -i wlan0 -c /data/wpa_supplicant.conf 2>/dev/null || \
-    wpa_supplicant -B -i wlan0 -c /data/quasar/wpa_supplicant.conf 2>/dev/null
+    wpa_supplicant -B -i wlan0 -c /data/wpa_supplicant.conf 2>/dev/null
 fi
 
 # 3. Перезапрашиваем IP по DHCP, если отвалился

@@ -125,7 +125,7 @@ fn default_anthropic_model() -> String {
     "claude-3-5-haiku-latest".to_string()
 }
 fn default_gemini_model() -> String {
-    "gemini-2.0-flash".to_string()
+    "gemini-3.5-flash".to_string()
 }
 fn default_perplexity_model() -> String {
     "sonar".to_string()
