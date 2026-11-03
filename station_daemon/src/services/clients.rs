@@ -1092,16 +1092,38 @@ pub fn parse_clean_json_response(content: &str, prompt: &str) -> DeepSeekRespons
         .trim_end_matches("```")
         .trim();
 
-    if let Ok(resp) = serde_json::from_str::<DeepSeekResponse>(cleaned) {
-        return resp;
-    }
+    let json_candidate = if let (Some(start), Some(end)) = (cleaned.find('{'), cleaned.rfind('}')) {
+        if start <= end { &cleaned[start..=end] } else { cleaned }
+    } else {
+        cleaned
+    };
 
-    if let Some(start) = cleaned.find('{') {
-        if let Some(end) = cleaned.rfind('}') {
-            if let Ok(resp) = serde_json::from_str::<DeepSeekResponse>(&cleaned[start..=end]) {
-                return resp;
+    if let Ok(v) = serde_json::from_str::<Value>(json_candidate) {
+        if let Some(obj) = v.as_object() {
+            let text = obj.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string();
+            let action = obj.get("action").and_then(|a| a.as_str()).unwrap_or("none").to_string();
+            let song = obj.get("song").and_then(|s| s.as_str()).unwrap_or("").to_string();
+            let color = if let Some(arr) = obj.get("color").and_then(|c| c.as_array()) {
+                if arr.len() == 3 {
+                    [
+                        arr[0].as_u64().unwrap_or(0) as u8,
+                        arr[1].as_u64().unwrap_or(150) as u8,
+                        arr[2].as_u64().unwrap_or(255) as u8,
+                    ]
+                } else {
+                    [0, 150, 255]
+                }
+            } else {
+                [0, 150, 255]
+            };
+            if !text.is_empty() {
+                return DeepSeekResponse { text, color, action, song };
             }
         }
+    }
+
+    if let Ok(resp) = serde_json::from_str::<DeepSeekResponse>(cleaned) {
+        return resp;
     }
 
     // Default fallback if model didn't return valid JSON
