@@ -293,6 +293,82 @@
       background: #ffa8b8;
     }
 
+    /* Boykisser Stickers & Peekers */
+    .m3-boykisser-sticker {
+      object-fit: contain;
+      cursor: pointer;
+      user-select: none;
+      transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.25s ease;
+      filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.35));
+      display: inline-block;
+      vertical-align: middle;
+    }
+    .m3-boykisser-sticker:hover {
+      transform: scale(1.15) rotate(-3deg);
+      filter: drop-shadow(0 8px 20px rgba(255, 180, 194, 0.55));
+    }
+    .m3-boykisser-sticker:active {
+      transform: scale(0.92) rotate(3deg);
+    }
+
+    /* Card Corner Peeker */
+    .m3-card-peeker-container {
+      position: absolute;
+      top: -24px;
+      right: 28px;
+      z-index: 40;
+      pointer-events: auto;
+    }
+    .m3-card-peeker {
+      width: 56px;
+      height: 56px;
+      object-fit: contain;
+      cursor: pointer;
+      user-select: none;
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.25s ease;
+      filter: drop-shadow(0 4px 10px rgba(0,0,0,0.45));
+    }
+    .m3-card-peeker:hover {
+      transform: translateY(-8px) scale(1.2);
+      filter: drop-shadow(0 8px 22px rgba(255, 180, 194, 0.65));
+    }
+    .m3-card-peeker:active {
+      transform: scale(0.92);
+    }
+
+    /* Floating music vibing animation */
+    @keyframes boykisser-vibe {
+      0%, 100% { transform: translateY(0) rotate(-2.5deg); }
+      50% { transform: translateY(-7px) rotate(2.5deg); }
+    }
+    .m3-boykisser-vibing {
+      animation: boykisser-vibe 1.5s ease-in-out infinite;
+    }
+
+    /* Interactive floating heart/sparkle popup */
+    .m3-floating-sparkle {
+      position: fixed;
+      font-size: 1.6rem;
+      pointer-events: none;
+      z-index: 999999;
+      user-select: none;
+      animation: float-sparkle 1s ease-out forwards;
+    }
+    @keyframes float-sparkle {
+      0% {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(0.5) translateY(0);
+      }
+      40% {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1.35) translateY(-28px);
+      }
+      100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.85) translateY(-60px);
+      }
+    }
+
     /* Home Grid */
     .m3-home-grid {
       display: grid;
@@ -672,10 +748,11 @@
   <div class="m3-app-layout">
     <!-- Left Navigation Rail -->
     <nav class="m3-nav-rail">
-      <div class="m3-avatar-scallop" onclick="openModal()" title="Furry station v0.1">
+      <div class="m3-avatar-scallop" onclick="openModal()" title="Furry station v0.1 • boykisser" style="cursor: pointer; position: relative; display: flex; align-items: center; justify-content: center;">
         <svg viewBox="0 0 100 100" class="m3-avatar-scallop-svg">
           <path d="M50 4 C58 4 62 10 68 12 C74 14 80 13 85 18 C90 23 89 29 93 35 C97 41 103 45 103 52 C103 59 97 63 93 69 C89 75 90 81 85 86 C80 91 74 90 68 92 C62 94 58 100 50 100 C42 100 38 94 32 92 C26 90 20 91 15 86 C10 81 11 75 7 69 C3 63 -3 59 -3 52 C-3 45 3 41 7 35 C11 29 10 23 15 18 C20 13 26 14 32 12 C38 10 42 4 50 4 Z" transform="translate(0, -2)" />
         </svg>
+        <img id="railScallopAvatar" class="m3-boykisser-sticker" data-mascot="1" style="width: 36px; height: 36px; position: absolute; z-index: 2;" alt="Mascot" />
       </div>
 
       <div class="m3-nav-rail-destinations">
@@ -728,10 +805,13 @@
     <!-- Main Content -->
     <main class="m3-main-container">
       <header class="m3-top-bar">
-        <div class="m3-title-group">
-          <h1>Furry station v0.1</h1>
-          <div class="m3-subtitle" id="topSubtitle">
-            *station model* • Yandex Station Lite • STOPPED
+        <div class="m3-title-group" style="display: flex; align-items: center; gap: 12px;">
+          <img class="m3-boykisser-sticker" data-mascot="2" style="width: 42px; height: 42px;" alt=":3" onclick="openModal()" title="Пухляш :3 Нажмите для информации" />
+          <div>
+            <h1>Furry station v0.1</h1>
+            <div class="m3-subtitle" id="topSubtitle">
+              *station model* • Yandex Station Lite • STOPPED
+            </div>
           </div>
         </div>
 
@@ -745,7 +825,10 @@
       <section id="tab-home" class="tab-content active">
         <div class="m3-home-grid">
           <!-- Left Quick Settings Pink Hero Card -->
-          <div class="m3-hero-pink-card">
+          <div class="m3-hero-pink-card" style="position: relative; overflow: visible;">
+            <div class="m3-card-peeker-container" title="Пухляш следит за громкостью :3">
+              <img class="m3-card-peeker" data-mascot="2" alt="Boykisser peeker" />
+            </div>
             <div>
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
                 <div style="display: flex; align-items: center; gap: 8px; font-size: 1.05rem; font-weight: 800; text-transform: uppercase; color: #370014;">
@@ -841,9 +924,10 @@
             <!-- Hardware Telemetry -->
             <div class="m3-surface-card">
               <div class="m3-card-header">
-                <div class="m3-card-title">
+                <div class="m3-card-title" style="display: flex; align-items: center; gap: 8px;">
                   <span class="material-symbols-rounded" style="color: #ffb4c2;">monitor_heart</span>
                   <span>Телеметрия Станции</span>
+                  <img class="m3-boykisser-sticker" data-mascot="3" style="width: 26px; height: 26px;" alt="Лапка" title="Лапка следит за датчиками :3" />
                 </div>
                 <div style="display: flex; align-items: center; gap: 6px;">
                   <span style="font-size: 0.72rem; font-weight: 700; color: #78dc96; background: rgba(120, 220, 150, 0.12); padding: 3px 8px; border-radius: 8px;">ONLINE</span>
@@ -906,9 +990,10 @@
             <!-- Voice Assistant Speech Bubble -->
             <div class="m3-surface-card">
               <div class="m3-card-header">
-                <div class="m3-card-title">
+                <div class="m3-card-title" style="display: flex; align-items: center; gap: 8px;">
                   <span class="material-symbols-rounded" style="color: #ffb4c2;">auto_awesome</span>
                   <span>Голосовой Ассистент Станции</span>
+                  <img class="m3-boykisser-sticker" data-mascot="4" style="width: 26px; height: 26px;" alt="Смущённый" title="Смущённый ассистент :3" />
                 </div>
                 <span id="homeLlmTag" style="font-size: 0.72rem; color: #ffb4c2; background: rgba(255, 180, 194, 0.1); padding: 3px 8px; border-radius: 8px; font-weight: 600;">OPENROUTER</span>
               </div>
@@ -936,13 +1021,16 @@
       <section id="tab-music" class="tab-content">
         <div style="display: flex; flex-direction: column; gap: 22px;">
           <!-- Main Hero Player -->
-          <div class="m3-surface-card" style="background: #1d1b22;">
+          <div class="m3-surface-card" style="background: #1d1b22; position: relative; overflow: visible;">
+            <div class="m3-card-peeker-container" title="Ты любишь целовать треки, не так ли? :3">
+              <img class="m3-card-peeker m3-boykisser-vibing" data-mascot="3" alt="Vibing Boykisser" />
+            </div>
             <div style="display: flex; gap: 28px; align-items: center; flex-wrap: wrap;">
               <div style="width: 140px; height: 140px; border-radius: 24px; background: #28252e; display: flex; align-items: center; justify-content: center; flex-direction: column; overflow: hidden; position: relative;">
                 <img id="musicArtworkImg" src="" style="width: 100%; height: 100%; object-fit: cover; display: none;" onerror="this.style.display='none'; const p=document.getElementById('musicVinylPlaceholder'); if(p) p.style.display='flex';"/>
                 <div id="musicVinylPlaceholder" style="display: flex; align-items: center; justify-content: center; flex-direction: column; width: 100%; height: 100%;">
-                  <span class="material-symbols-rounded" style="font-size: 56px; color: #ffb4c2;" id="playerBigIcon">music_note</span>
-                  <span style="font-size: 0.68rem; font-weight: 700; color: #78dc96; margin-top: 2px;" id="playerStateBadge">STOPPED</span>
+                  <img class="m3-boykisser-sticker m3-boykisser-vibing" data-mascot="1" style="width: 76px; height: 76px;" alt="Music Boykisser" title="Радостный меломан :3" />
+                  <span style="font-size: 0.68rem; font-weight: 700; color: #ffb4c2; margin-top: 4px;" id="playerStateBadge">STOPPED</span>
                 </div>
               </div>
 
@@ -1024,9 +1112,10 @@
           <!-- Multi-Source Music Search (YouTube Music, SoundCloud, Radio) -->
           <div class="m3-surface-card">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-              <div class="m3-card-title">
+              <div class="m3-card-title" style="display: flex; align-items: center; gap: 8px;">
                 <span class="material-symbols-rounded" style="color: #ffb4c2;">library_music</span>
                 <span>Поиск музыки (YouTube Music, SoundCloud, Радио)</span>
+                <img class="m3-boykisser-sticker" data-mascot="1" style="width: 26px; height: 26px;" alt=":3" title="Ищем классную музыку :3" />
               </div>
               <div style="display: flex; gap: 8px; flex-wrap: wrap;" id="musicSourceGroup">
                 <button type="button" class="m3-music-source-pill active" onclick="setMusicSource('ytmusic', this)" data-source="ytmusic">
@@ -1158,9 +1247,10 @@
           <!-- System Prompt -->
           <div class="m3-surface-card">
             <div class="m3-card-header">
-              <div class="m3-card-title">
+              <div class="m3-card-title" style="display: flex; align-items: center; gap: 8px;">
                 <span class="material-symbols-rounded" style="color: #ffb4c2;">psychology</span>
                 <span>Системный промпт ассистента</span>
+                <img class="m3-boykisser-sticker" data-mascot="4" style="width: 26px; height: 26px;" alt="Brain" title="Умный бойкисер думает :3" />
               </div>
               <button type="button" class="m3-btn m3-btn-primary" onclick="saveConfigAll()">Сохранить промпт</button>
             </div>
@@ -1170,9 +1260,10 @@
           <!-- Dialogue History -->
           <div class="m3-surface-card">
             <div class="m3-card-header">
-              <div class="m3-card-title">
+              <div class="m3-card-title" style="display: flex; align-items: center; gap: 8px;">
                 <span class="material-symbols-rounded" style="color: #ffb4c2;">history</span>
                 <span>История диалогов Станции</span>
+                <img class="m3-boykisser-sticker" data-mascot="1" style="width: 24px; height: 24px;" alt=":3" title="Диалоги :3" />
               </div>
               <button type="button" class="m3-btn m3-btn-tonal" onclick="fetchLogs()">Обновить логи</button>
             </div>
@@ -1180,7 +1271,10 @@
           </div>
 
           <!-- LLM Brain Settings -->
-          <div class="m3-surface-card">
+          <div class="m3-surface-card" style="position: relative; overflow: visible;">
+            <div class="m3-card-peeker-container" title="Нейро-бойкисер размышляет :3">
+              <img class="m3-card-peeker" data-mascot="4" alt="Thinking Boykisser" />
+            </div>
             <div class="m3-card-title">
               <span class="material-symbols-rounded" style="color: #ffb4c2;">neurology</span>
               <span>Провайдер нейросети (LLM Brain)</span>
@@ -1283,7 +1377,7 @@
             <div style="display: flex; justify-content: center; padding: 30px 0;">
               <div id="ledRingOuter" style="width: 180px; height: 180px; border-radius: 50%; background: rgb(255, 180, 194); padding: 12px; display: flex; align-items: center; justify-content: center;">
                 <div style="width: 100%; height: 100%; border-radius: 50%; background: #100e12; display: flex; align-items: center; justify-content: center; flex-direction: column;">
-                  <span class="material-symbols-rounded" id="ledLightIcon" style="font-size: 40px; color: rgb(255, 180, 194);">lightbulb</span>
+                  <img class="m3-boykisser-sticker" data-mascot="1" id="ledBoykisserImg" style="width: 52px; height: 52px; filter: drop-shadow(0 0 12px rgb(255, 180, 194));" alt="LED Boykisser" title="Светящийся бойкисер :3" />
                   <div id="ledRgbLabel" style="font-size: 0.75rem; font-weight: 700; color: #fff; margin-top: 4px;">RGB(255, 180, 194)</div>
                 </div>
               </div>
@@ -1311,8 +1405,11 @@
       <!-- TAB 5: TERMINAL -->
       <section id="tab-terminal" class="tab-content">
         <div style="display: flex; flex-direction: column; gap: 20px;">
-          <div class="m3-surface-card">
-            <div class="m3-card-title">
+          <div class="m3-surface-card" style="position: relative; overflow: visible;">
+            <div class="m3-card-peeker-container" title="Хакер-бойкисер в терминале :3">
+              <img class="m3-card-peeker" data-mascot="0" alt="Hacker Boykisser" />
+            </div>
+            <div class="m3-card-title" style="display: flex; align-items: center; gap: 8px;">
               <span class="material-symbols-rounded" style="color: #ffb4c2;">terminal</span>
               <span>Командная строка станции (station_daemon / Shell)</span>
             </div>
@@ -1345,11 +1442,15 @@
         <div style="display: flex; flex-direction: column; gap: 24px;">
 
           <!-- Wi-Fi Management -->
-          <div class="m3-surface-card">
+          <div class="m3-surface-card" style="position: relative; overflow: visible;">
+            <div class="m3-card-peeker-container" title="Пухляш настраивает Wi-Fi :3">
+              <img class="m3-card-peeker" data-mascot="2" alt="Settings Boykisser" />
+            </div>
             <div class="m3-card-header">
-              <div class="m3-card-title">
+              <div class="m3-card-title" style="display: flex; align-items: center; gap: 8px;">
                 <span class="material-symbols-rounded" style="color: #ffb4c2;">wifi</span>
                 <span>Управление Wi-Fi (wlan0)</span>
+                <img class="m3-boykisser-sticker" data-mascot="2" style="width: 26px; height: 26px;" alt=":3" title="Wi-Fi Boykisser" />
               </div>
               <div style="display: flex; gap: 8px;">
                 <button type="button" class="m3-btn m3-btn-tonal" onclick="fetchWifiStatus()">
@@ -1564,6 +1665,14 @@
           </div>
         </div>
 
+        <div style="margin-top: 18px; margin-bottom: 8px;">
+          <div style="font-size: 0.84rem; font-weight: 700; color: #ffb4c2; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+            <span class="material-symbols-rounded" style="font-size: 18px;">auto_awesome</span>
+            <span>Маскоты станции (нажмите, чтобы выбрать главного):</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;" id="mascotPickerGrid"></div>
+        </div>
+
         <div style="margin-top: 24px; display: flex; justify-content: flex-end;">
           <button type="button" class="m3-btn m3-btn-primary" onclick="closeModal()">Закрыть</button>
         </div>
@@ -1661,10 +1770,82 @@
       'settings': BOYKISSER_MASCOTS[2].src   // Chubby boykisser
     };
 
+    const SPARKLE_EMOJIS = ['💖', '🐾', '✨', '🐾', '💕', ':3', 'OwO', 'UwU', '❤️', '🎶'];
+    function spawnBoykisserHeart(x, y) {
+      const el = document.createElement('div');
+      el.className = 'm3-floating-sparkle';
+      el.innerText = SPARKLE_EMOJIS[Math.floor(Math.random() * SPARKLE_EMOJIS.length)];
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 1000);
+    }
+
+    function initBoykisserStickers() {
+      document.querySelectorAll('.m3-boykisser-sticker, .m3-card-peeker').forEach(img => {
+        const idx = parseInt(img.getAttribute('data-mascot') || '0', 10);
+        if (BOYKISSER_MASCOTS[idx]) {
+          img.src = BOYKISSER_MASCOTS[idx].src;
+          if (!img.title) {
+            img.title = BOYKISSER_MASCOTS[idx].title + ' :3';
+          }
+        }
+        img.addEventListener('click', (e) => {
+          e.stopPropagation();
+          spawnBoykisserHeart(e.clientX, e.clientY);
+        });
+      });
+
+      // Nav rail scallop avatar
+      const railAvatar = document.getElementById('railScallopAvatar');
+      if (railAvatar && BOYKISSER_MASCOTS[1]) {
+        railAvatar.src = BOYKISSER_MASCOTS[1].src;
+      }
+
+      // Populate mascot picker in modal
+      const grid = document.getElementById('mascotPickerGrid');
+      if (grid && grid.children.length === 0) {
+        BOYKISSER_MASCOTS.forEach((m, idx) => {
+          const item = document.createElement('div');
+          item.className = 'm3-mascot-card';
+          item.style.cssText = 'background: #17151a; border-radius: 14px; padding: 10px 6px; display: flex; flex-direction: column; align-items: center; text-align: center; cursor: pointer; transition: transform 0.2s ease, border-color 0.2s ease; border: 2px solid transparent;';
+          item.innerHTML = `
+            <img src="${m.src}" style="width: 52px; height: 52px; object-fit: contain; margin-bottom: 6px;" alt="${m.name}" />
+            <div style="font-size: 0.76rem; font-weight: 700; color: #fff;">${m.name}</div>
+            <div style="font-size: 0.65rem; color: #ffb4c2; margin-top: 2px;">#${m.id}</div>
+          `;
+          item.onclick = (e) => {
+            selectActiveMascot(idx);
+            spawnBoykisserHeart(e.clientX, e.clientY);
+          };
+          grid.appendChild(item);
+        });
+      }
+
+      const savedIdx = parseInt(localStorage.getItem('selected_mascot_idx') || '2', 10);
+      selectActiveMascot(savedIdx);
+    }
+
+    function selectActiveMascot(idx) {
+      if (!BOYKISSER_MASCOTS[idx]) return;
+      localStorage.setItem('selected_mascot_idx', idx);
+      const bgImg = document.getElementById('bgWatermark');
+      if (bgImg) bgImg.src = BOYKISSER_MASCOTS[idx].src;
+      const railAvatar = document.getElementById('railScallopAvatar');
+      if (railAvatar) railAvatar.src = BOYKISSER_MASCOTS[idx].src;
+      document.querySelectorAll('#mascotPickerGrid .m3-mascot-card').forEach((c, i) => {
+        c.style.borderColor = (i === idx) ? '#ffb4c2' : 'transparent';
+        c.style.background = (i === idx) ? 'rgba(255, 180, 194, 0.12)' : '#17151a';
+      });
+    }
+
     function updateWatermarks(tab) {
       const bgImg = document.getElementById('bgWatermark');
       const railImg = document.getElementById('railWatermark');
-      const targetSrc = TAB_WATERMARKS[tab] || BOYKISSER_MASCOTS[2].src;
+      const savedIdx = localStorage.getItem('selected_mascot_idx');
+      const targetSrc = (savedIdx !== null && BOYKISSER_MASCOTS[savedIdx])
+        ? BOYKISSER_MASCOTS[savedIdx].src
+        : (TAB_WATERMARKS[tab] || BOYKISSER_MASCOTS[2].src);
 
       if (bgImg) {
         bgImg.style.opacity = '0';
@@ -2041,7 +2222,8 @@
       document.getElementById('gVal').innerText = g;
       document.getElementById('bVal').innerText = b;
       document.getElementById('ledRingOuter').style.background = `rgb(${r}, ${g}, ${b})`;
-      document.getElementById('ledLightIcon').style.color = `rgb(${r}, ${g}, ${b})`;
+      const ledMascot = document.getElementById('ledBoykisserImg');
+      if (ledMascot) ledMascot.style.filter = `drop-shadow(0 0 16px rgb(${r}, ${g}, ${b}))`;
       document.getElementById('ledRgbLabel').innerText = `RGB(${r}, ${g}, ${b})`;
       sendLed(r, g, b);
     }
@@ -2539,6 +2721,7 @@
     // Auto refresh status and load config
     fetchStatus();
     loadAssistantConfig();
+    initBoykisserStickers();
     setInterval(fetchStatus, 4000);
   
     // ==========================================
