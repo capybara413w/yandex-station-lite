@@ -146,7 +146,7 @@ impl PlayerService {
 
         // 2. Send SIGKILL to ensure no zombie or hung processes remain
         let _ = Command::new("killall")
-            .args(["-9", "aplay", "mpg123", "ffmpeg", "play.sh", "curl"])
+            .args(["-9", "aplay", "mpg123", "ffmpeg", "play.sh"])
             .output();
 
         let _ = fs::remove_file("/tmp/music_paused");
@@ -479,12 +479,20 @@ impl PlayerService {
             info!("▶ Executing playback pipeline in terminal:\n{}", pipeline_cmd);
 
             // Inherit stdout and stderr directly so the terminal shows all decoder messages live
-            let process = Command::new("/bin/sh")
-                .args(["-c", &pipeline_cmd])
+            let mut cmd = Command::new("/bin/sh");
+            cmd.args(["-c", &pipeline_cmd])
                 .stdin(Stdio::null())
                 .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
-                .spawn();
+                .stderr(Stdio::inherit());
+
+            if !proxy_arg.is_empty() {
+                cmd.env("http_proxy", "http://127.0.0.1:8889")
+                    .env("https_proxy", "http://127.0.0.1:8889")
+                    .env("HTTP_PROXY", "http://127.0.0.1:8889")
+                    .env("HTTPS_PROXY", "http://127.0.0.1:8889");
+            }
+
+            let process = cmd.spawn();
 
             let exit_status = match process {
                 Ok(mut child) => child.wait(),

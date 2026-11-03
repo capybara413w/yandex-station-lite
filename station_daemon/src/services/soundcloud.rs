@@ -5,13 +5,13 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-const DEFAULT_CLIENT_ID: &str = "xk6BGxLCsQJ5Ss0bH6sRdsZhts3gTNaU";
+const DEFAULT_CLIENT_ID: &str = "swtEGNKrP2w6Z5B8DVvAurWCwNQBlgMd";
 const BACKUP_CLIENT_IDS: &[&str] = &[
+    "swtEGNKrP2w6Z5B8DVvAurWCwNQBlgMd",
     "xk6BGxLCsQJ5Ss0bH6sRdsZhts3gTNaU",
     "a3e059563d7fd3372b49b37f00a00bcf",
     "2t9loNfh0ekOfbnLeBYjdO50ExQ0edIF",
     "iZIs9mchVcX5lhVR1EzGCcyddKZaPjai",
-    "fDoItMDL104mveTnd7qveY4vEw0bF41n",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,8 +85,9 @@ impl SoundCloudService {
             .timeout(std::time::Duration::from_secs(8))
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
 
-        if cfg.proxy.enabled && !cfg.proxy.socks5_url.is_empty() {
-            if let Ok(p) = reqwest::Proxy::all(&cfg.proxy.socks5_url) {
+        if cfg.proxy.enabled {
+            let local_proxy = "http://127.0.0.1:8889";
+            if let Ok(p) = reqwest::Proxy::all(local_proxy) {
                 builder = builder.proxy(p);
             }
         }

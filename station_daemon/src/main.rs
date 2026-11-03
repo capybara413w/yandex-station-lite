@@ -9,7 +9,7 @@ use hardware::{
 };
 use services::{
     DeepSeekService, PlayerService, ProxyBridge, SoundCloudService, SttService, TtsService,
-    VisualizerService,
+    VisualizerService, YtMusicService,
 };
 use std::net::SocketAddr;
 use std::path::Path;
@@ -75,6 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let deepseek = Arc::new(DeepSeekService::new(config.clone(), &initial_config.proxy));
     let soundcloud = Arc::new(SoundCloudService::new(config.clone()));
+    let ytmusic = Arc::new(YtMusicService::new(config.clone()));
     let stt = Arc::new(SttService::new(
         initial_config.audio.record_device.clone(),
         initial_config.audio.sample_rate,
@@ -202,6 +203,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         deepseek: deepseek.clone(),
         player: player.clone(),
         soundcloud: soundcloud.clone(),
+        ytmusic: ytmusic.clone(),
         stt: stt.clone(),
         tts: tts.clone(),
         visualizer: visualizer.clone(),

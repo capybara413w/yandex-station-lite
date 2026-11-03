@@ -20,14 +20,35 @@ impl ProxyBridge {
     /// Spawns a background HTTP CONNECT tunnel on 127.0.0.1:8889 that forwards to the configured SOCKS5 proxy
     pub fn start(self: Arc<Self>, bind_port: u16) {
         tokio::spawn(async move {
-            let addr = format!("127.0.0.1:{}", bind_port);
-            let listener = match TcpListener::bind(&addr).await {
-                Ok(l) => {
-                    info!("Local HTTP-to-SOCKS5 audio proxy bridge listening on {}", addr);
-                    l
-                }
+            let addr_str = format!("127.0.0.1:{}", bind_port);
+            let sock_addr: std::net::SocketAddr = match addr_str.parse() {
+                Ok(a) => a,
                 Err(e) => {
-                    warn!("Failed to bind local HTTP proxy bridge on {}: {}", addr, e);
+                    warn!("Invalid proxy bridge bind address {}: {}", addr_str, e);
+                    return;
+                }
+            };
+
+            let mut listener = None;
+            for _attempt in 1..=20 {
+                if let Ok(socket) = tokio::net::TcpSocket::new_v4() {
+                    let _ = socket.set_reuseaddr(true);
+                    let _ = socket.set_reuseport(true);
+                    if socket.bind(sock_addr).is_ok() {
+                        if let Ok(l) = socket.listen(128) {
+                            info!("Local HTTP-to-SOCKS5 audio proxy bridge listening on {}", addr_str);
+                            listener = Some(l);
+                            break;
+                        }
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+
+            let listener = match listener {
+                Some(l) => l,
+                None => {
+                    warn!("Failed to bind local HTTP proxy bridge on {} after multiple attempts", addr_str);
                     return;
                 }
             };

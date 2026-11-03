@@ -4,10 +4,10 @@ use crate::config::{
 use crate::hardware::{AudioHardware, LedController, NetworkHardware, StationButtonEvent};
 use crate::services::{
     DeepSeekService, PlaybackState, PlayerService, SoundCloudService, SttService, TtsService,
-    VisualizerService,
+    VisualizerService, YtMusicService,
 };
 use axum::{
-    extract::{Query, State},
+    extract::{Path as AxumPath, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse},
     routing::{get, post},
@@ -88,6 +88,7 @@ pub struct AppState {
     pub deepseek: Arc<DeepSeekService>,
     pub player: Arc<PlayerService>,
     pub soundcloud: Arc<SoundCloudService>,
+    pub ytmusic: Arc<YtMusicService>,
     pub stt: Arc<SttService>,
     pub tts: Arc<TtsService>,
     pub visualizer: Arc<VisualizerService>,
@@ -120,6 +121,15 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/music/search", get(music_search_handler))
         .route("/api/soundcloud/search", get(music_search_handler))
         .route("/api/soundcloud/play", post(soundcloud_play_handler))
+        // YouTube Music Personalized & Streaming API
+        .route("/api/ytmusic/status", get(ytmusic_status_handler))
+        .route("/api/ytmusic/cookie", post(ytmusic_cookie_handler))
+        .route("/api/ytmusic/home", get(ytmusic_home_handler))
+        .route("/api/ytmusic/liked", get(ytmusic_liked_handler))
+        .route("/api/ytmusic/playlists", get(ytmusic_playlists_handler))
+        .route("/api/ytmusic/playlist/:id", get(ytmusic_playlist_tracks_handler))
+        .route("/api/ytmusic/search", get(ytmusic_search_handler))
+        .route("/api/ytmusic/play", post(ytmusic_play_handler))
         // Visualizer (3-Band Reactive Lightshow: Low, Mid, High)
         .route("/api/visualizer", get(get_visualizer_handler))
         .route("/api/visualizer/toggle", post(toggle_visualizer_handler))
@@ -736,6 +746,243 @@ async fn soundcloud_play_handler(
         })),
     )
         .into_response()
+}
+
+// -----------------------------------------------------------------------------
+// YouTube Music Personalized & Streaming Handlers
+// -----------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct YtPlayRequest {
+    pub video_id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub artist: String,
+    #[serde(default)]
+    pub artwork_url: Option<String>,
+    #[serde(default)]
+    pub duration_seconds: Option<u64>,
+}
+
+#[derive(Deserialize)]
+pub struct YtCookiePayload {
+    pub cookie: String,
+}
+
+#[derive(Deserialize)]
+pub struct LimitQuery {
+    pub limit: Option<usize>,
+}
+
+async fn ytmusic_status_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let status = state.ytmusic.get_status().await;
+    Json(serde_json::json!({
+        "success": true,
+        "status": status,
+    }))
+}
+
+async fn ytmusic_cookie_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<YtCookiePayload>,
+) -> impl IntoResponse {
+    match state.ytmusic.update_cookie(payload.cookie).await {
+        Ok(_) => {
+            let status = state.ytmusic.get_status().await;
+            (StatusCode::OK, Json(serde_json::json!({
+                "success": true,
+                "status": status,
+            })))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+            "success": false,
+            "error": e,
+        }))),
+    }
+}
+
+async fn ytmusic_home_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match state.ytmusic.get_home().await {
+        Ok(sections) => (StatusCode::OK, Json(serde_json::json!({
+            "success": true,
+            "sections": sections,
+        }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+            "success": false,
+            "error": e,
+            "sections": [],
+        }))).into_response(),
+    }
+}
+
+async fn ytmusic_liked_handler(
+    State(state): State<AppState>,
+    Query(params): Query<LimitQuery>,
+) -> impl IntoResponse {
+    let limit = params.limit.unwrap_or(50);
+    match state.ytmusic.get_liked_songs(limit).await {
+        Ok(tracks) => (StatusCode::OK, Json(serde_json::json!({
+            "success": true,
+            "tracks": tracks,
+        }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+            "success": false,
+            "error": e,
+            "tracks": [],
+        }))).into_response(),
+    }
+}
+
+async fn ytmusic_playlists_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match state.ytmusic.get_library_playlists().await {
+        Ok(playlists) => (StatusCode::OK, Json(serde_json::json!({
+            "success": true,
+            "playlists": playlists,
+        }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+            "success": false,
+            "error": e,
+            "playlists": [],
+        }))).into_response(),
+    }
+}
+
+async fn ytmusic_playlist_tracks_handler(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> impl IntoResponse {
+    match state.ytmusic.get_playlist_tracks(&id).await {
+        Ok(tracks) => (StatusCode::OK, Json(serde_json::json!({
+            "success": true,
+            "playlist_id": id,
+            "tracks": tracks,
+        }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+            "success": false,
+            "error": e,
+            "tracks": [],
+        }))).into_response(),
+    }
+}
+
+async fn ytmusic_play_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<YtPlayRequest>,
+) -> impl IntoResponse {
+    state.tts.stop(&state.led);
+
+    let vid = payload.video_id.trim();
+    if vid.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
+            "success": false,
+            "error": "Empty video_id",
+        }))).into_response();
+    }
+
+    let title = if payload.title.is_empty() { "YouTube Music Track".to_string() } else { payload.title };
+    let artist = if payload.artist.is_empty() { "YouTube Music".to_string() } else { payload.artist };
+
+    match state.ytmusic.resolve_stream_url(vid).await {
+        Ok(stream_url) => {
+            let dur_secs = payload.duration_seconds.unwrap_or(210);
+            state.player.play_direct_stream(
+                &stream_url,
+                &title,
+                &artist,
+                payload.artwork_url.clone(),
+                dur_secs,
+                false,
+                0,
+                &state.led,
+            ).await;
+
+            state.logs.push("INFO", &format!("YouTube Music: запуск '{}' ({})", title, vid)).await;
+
+            (StatusCode::OK, Json(serde_json::json!({
+                "success": true,
+                "title": title,
+                "artist": artist,
+                "stream_url": stream_url,
+            }))).into_response()
+        }
+        Err(e) => {
+            warn!("YouTube Music direct resolve error for {}: {}. Attempting audio stream fallback...", vid, e);
+            let query = format!("{} {}", title, artist);
+            match state.soundcloud.resolve_best_stream(&query).await {
+                Ok(resolved) => {
+                    let dur_secs = resolved.duration_ms / 1000;
+                    state.player.play_direct_stream(
+                        &resolved.stream_url,
+                        &title,
+                        &artist,
+                        payload.artwork_url.clone().or(resolved.artwork_url),
+                        dur_secs,
+                        resolved.is_hls,
+                        0,
+                        &state.led,
+                    ).await;
+
+                    state.logs.push("INFO", &format!("YouTube Music: запуск '{}' ({})", title, vid)).await;
+                    (StatusCode::OK, Json(serde_json::json!({
+                        "success": true,
+                        "title": title,
+                        "artist": artist,
+                        "stream_url": resolved.stream_url,
+                        "fallback": true,
+                    }))).into_response()
+                }
+                Err(sc_err) => {
+                    error!("YouTube Music resolve error for {}: {} (fallback: {})", vid, e, sc_err);
+                    state.logs.push("ERROR", &format!("YouTube Music error for {}: {}", vid, e)).await;
+                    (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                        "success": false,
+                        "error": format!("YT Music error: {}. Fallback error: {}", e, sc_err),
+                    }))).into_response()
+                }
+            }
+        }
+    }
+}
+
+async fn ytmusic_search_handler(
+    State(state): State<AppState>,
+    Query(params): Query<MusicSearchQuery>,
+) -> impl IntoResponse {
+    let q = params.q.trim();
+    if q.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Empty search query" })),
+        )
+            .into_response();
+    }
+    let limit = params.limit.unwrap_or(20);
+    match state.ytmusic.search(q, limit).await {
+        Ok(tracks) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "success": true,
+                "source": "ytmusic",
+                "query": q,
+                "results": tracks,
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            warn!("YT Music search for '{}' failed: {}", q, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": e,
+                    "source": "ytmusic",
+                    "results": [],
+                })),
+            )
+                .into_response()
+        }
+    }
 }
 
 fn resolve_song_target(query: &str) -> String {

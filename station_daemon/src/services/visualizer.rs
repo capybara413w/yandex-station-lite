@@ -90,10 +90,23 @@ impl VisualizerService {
         tokio::spawn(async move {
             info!("Starting lightweight reactive 3-band audio visualizer on UDP 127.0.0.1:7777");
 
-            let socket = match UdpSocket::bind("127.0.0.1:7777").await {
-                Ok(s) => s,
-                Err(e) => {
-                    warn!("Failed to bind UDP visualizer socket on 127.0.0.1:7777: {}", e);
+            let mut socket_opt = None;
+            for _attempt in 1..=20 {
+                match UdpSocket::bind("127.0.0.1:7777").await {
+                    Ok(s) => {
+                        socket_opt = Some(s);
+                        break;
+                    }
+                    Err(_) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    }
+                }
+            }
+
+            let socket = match socket_opt {
+                Some(s) => s,
+                None => {
+                    warn!("Failed to bind UDP visualizer socket on 127.0.0.1:7777 after multiple attempts");
                     return;
                 }
             };

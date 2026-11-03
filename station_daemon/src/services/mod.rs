@@ -6,6 +6,7 @@ pub mod soundcloud;
 pub mod stt;
 pub mod tts;
 pub mod visualizer;
+pub mod ytmusic;
 
 pub use clients::{
     CloudflareLlmClient, CloudflareSttClient, CloudflareTtsClient, GoogleTtsClient, LlmClient,
@@ -19,4 +20,5 @@ pub use soundcloud::SoundCloudService;
 pub use stt::SttService;
 pub use tts::TtsService;
 pub use visualizer::VisualizerService;
+pub use ytmusic::YtMusicService;
 

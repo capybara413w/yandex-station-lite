@@ -39,9 +39,10 @@ impl TtsService {
             .timeout(std::time::Duration::from_secs(12))
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
 
-        if proxy.enabled && !proxy.socks5_url.is_empty() {
-            if let Ok(p) = reqwest::Proxy::all(&proxy.socks5_url) {
-                info!("TTS Service using SOCKS5 proxy: {}", proxy.socks5_url);
+        if proxy.enabled {
+            let local_proxy = "http://127.0.0.1:8889";
+            if let Ok(p) = reqwest::Proxy::all(local_proxy) {
+                info!("TTS Service using local proxy bridge: {}", local_proxy);
                 builder = builder.proxy(p);
             }
         }

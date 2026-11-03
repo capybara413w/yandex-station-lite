@@ -268,6 +268,21 @@ export default function App() {
   const [scResults, setScResults] = useState<any[]>([]);
   const [scLoading, setScLoading] = useState(false);
 
+  // YouTube Music Account & Library state
+  const [ytStatus, setYtStatus] = useState<{ has_cookie: boolean; is_authenticated: boolean; user_name?: string }>({
+    has_cookie: false,
+    is_authenticated: false,
+  });
+  const [ytSubTab, setYtSubTab] = useState<'search' | 'recommendations' | 'liked' | 'playlists'>('search');
+  const [ytHomeSections, setYtHomeSections] = useState<any[]>([]);
+  const [ytLikedSongs, setYtLikedSongs] = useState<any[]>([]);
+  const [ytPlaylists, setYtPlaylists] = useState<any[]>([]);
+  const [selectedYtPlaylist, setSelectedYtPlaylist] = useState<any | null>(null);
+  const [ytPlaylistTracks, setYtPlaylistTracks] = useState<any[]>([]);
+  const [ytLoading, setYtLoading] = useState(false);
+  const [isYtCookieModalOpen, setIsYtCookieModalOpen] = useState(false);
+  const [ytCookieInput, setYtCookieInput] = useState('');
+
   // Home Quick Queries & Terminal
   const [testQueryInput, setTestQueryInput] = useState('');
   const [responsePreview, setResponsePreview] = useState('Нажмите «Спросить» или введите запрос');
@@ -616,6 +631,8 @@ export default function App() {
     fetchWifiStatus();
     fetchPowersave();
     fetchBtStatus();
+    fetchYtStatus();
+    fetchYtHome();
 
     const timer = setInterval(() => {
       fetchPlayerStatus();
@@ -704,6 +721,121 @@ export default function App() {
   };
 
   const handleSearchSoundcloud = (queryText?: string) => handleSearchMusic(queryText);
+
+  const fetchYtStatus = async () => {
+    try {
+      const res = await fetch('/api/ytmusic/status');
+      if (res.ok) {
+        const d = await res.json();
+        if (d.status) setYtStatus(d.status);
+      }
+    } catch {}
+  };
+
+  const fetchYtHome = async () => {
+    setYtLoading(true);
+    try {
+      const res = await fetch('/api/ytmusic/home');
+      const d = await res.json();
+      if (d.success && d.sections) {
+        setYtHomeSections(d.sections);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setYtLoading(false);
+    }
+  };
+
+  const fetchYtLiked = async () => {
+    setYtLoading(true);
+    try {
+      const res = await fetch('/api/ytmusic/liked?limit=50');
+      const d = await res.json();
+      if (d.success && d.tracks) {
+        setYtLikedSongs(d.tracks);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setYtLoading(false);
+    }
+  };
+
+  const fetchYtPlaylists = async () => {
+    setYtLoading(true);
+    try {
+      const res = await fetch('/api/ytmusic/playlists');
+      const d = await res.json();
+      if (d.success && d.playlists) {
+        setYtPlaylists(d.playlists);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setYtLoading(false);
+    }
+  };
+
+  const fetchYtPlaylistTracks = async (playlist: any) => {
+    setSelectedYtPlaylist(playlist);
+    setYtLoading(true);
+    try {
+      const res = await fetch(`/api/ytmusic/playlist/${encodeURIComponent(playlist.id)}`);
+      const d = await res.json();
+      if (d.success && d.tracks) {
+        setYtPlaylistTracks(d.tracks);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setYtLoading(false);
+    }
+  };
+
+  const handlePlayYtTrack = async (track: { id: string; title: string; artist: string; artwork_url?: string; duration_seconds?: number }) => {
+    try {
+      await fetch('/api/ytmusic/play', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          video_id: track.id,
+          title: track.title,
+          artist: track.artist,
+          artwork_url: track.artwork_url,
+          duration_seconds: track.duration_seconds,
+        }),
+      });
+      fetchPlayerStatus();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleSaveYtCookie = async () => {
+    if (!ytCookieInput.trim()) return;
+    try {
+      const res = await fetch('/api/ytmusic/cookie', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cookie: ytCookieInput.trim() }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        setYtStatus(d.status);
+        setIsYtCookieModalOpen(false);
+        setYtCookieInput('');
+        alert('✅ Cookie YouTube Music успешно сохранен! Рекомендации и плейлисты активированы.');
+        fetchYtHome();
+        fetchYtLiked();
+        fetchYtPlaylists();
+      } else {
+        alert('Ошибка сохранения: ' + (d.error || 'неизвестная ошибка'));
+      }
+    } catch (e: any) {
+      alert('Ошибка: ' + e.message);
+    }
+  };
 
   const handleSendLed = async (rgb: number[]) => {
     setLedColor(rgb);
@@ -1581,7 +1713,79 @@ export default function App() {
               </div>
             </div>
 
+            {/* SubTab Navigation Bar: Search, Recommendations, Liked, Playlists */}
+            <div className="m3-surface-card" style={{ padding: '12px 18px', background: '#1c1a21', border: 'none' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {[
+                    { id: 'search', label: 'Поиск', icon: 'search' },
+                    { id: 'recommendations', label: 'Рекомендации', icon: 'auto_awesome' },
+                    { id: 'liked', label: 'Понравившиеся', icon: 'favorite' },
+                    { id: 'playlists', label: 'Плейлисты', icon: 'queue_music' },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => {
+                        const newTab = tab.id as any;
+                        setYtSubTab(newTab);
+                        if (newTab === 'recommendations' && ytHomeSections.length === 0) fetchYtHome();
+                        if (newTab === 'liked' && ytLikedSongs.length === 0) fetchYtLiked();
+                        if (newTab === 'playlists' && ytPlaylists.length === 0) fetchYtPlaylists();
+                      }}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '9999px',
+                        border: 'none',
+                        background: ytSubTab === tab.id ? '#ffb4c2' : '#282430',
+                        color: ytSubTab === tab.id ? '#370014' : '#e6e0e9',
+                        fontSize: '0.84rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>{tab.icon}</span>
+                      <span>{tab.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Account Status Pill / Cookie Button */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsYtCookieModalOpen(true)}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '9999px',
+                      border: '1px solid ' + (ytStatus.is_authenticated ? '#4caf50' : '#ffa726'),
+                      background: ytStatus.is_authenticated ? 'rgba(76, 175, 80, 0.12)' : 'rgba(255, 167, 38, 0.12)',
+                      color: ytStatus.is_authenticated ? '#81c784' : '#ffb74d',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <span className="material-symbols-rounded" style={{ fontSize: '16px' }}>
+                      {ytStatus.is_authenticated ? 'verified_user' : 'account_circle'}
+                    </span>
+                    <span>
+                      {ytStatus.is_authenticated ? 'YouTube Music подключен' : 'Войти в YouTube Music'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {/* 2. Multi-Source Music Search (YouTube Music, SoundCloud, Radio) */}
+            {ytSubTab === 'search' && (
             <div className="m3-surface-card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                 <div className="m3-card-title">
@@ -1788,10 +1992,14 @@ export default function App() {
                           className="m3-btn m3-btn-primary"
                           style={{ padding: '6px 14px', fontSize: '0.78rem' }}
                           onClick={() => {
-                            const target = (t.source === 'radio' && (t.stream_url || t.url)) 
-                              ? (t.stream_url || t.url) 
-                              : `${t.title} ${t.artist || ''}`.trim();
-                            handlePlaySong(target);
+                            if (t.source === 'ytmusic' && t.id) {
+                              handlePlayYtTrack(t);
+                            } else {
+                              const target = (t.source === 'radio' && (t.stream_url || t.url)) 
+                                ? (t.stream_url || t.url) 
+                                : `${t.title} ${t.artist || ''}`.trim();
+                              handlePlaySong(target);
+                            }
                           }}
                         >
                           <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>play_arrow</span>
@@ -1803,6 +2011,271 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            )}
+
+            {/* ----------------- SUBTAB: RECOMMENDATIONS ----------------- */}
+            {ytSubTab === 'recommendations' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>auto_awesome</span>
+                    <span>Персональный эфир и супермиксы</span>
+                  </div>
+                  <button type="button" className="m3-btn m3-btn-tonal" onClick={fetchYtHome} disabled={ytLoading}>
+                    <span className="material-symbols-rounded">refresh</span>
+                    <span>Обновить</span>
+                  </button>
+                </div>
+
+                {ytLoading && ytHomeSections.length === 0 ? (
+                  <div className="m3-surface-card" style={{ textAlign: 'center', padding: '36px', color: '#ffb4c2' }}>
+                    Загрузка супермиксов и рекомендаций из YouTube Music...
+                  </div>
+                ) : ytHomeSections.length === 0 ? (
+                  <div className="m3-surface-card" style={{ textAlign: 'center', padding: '36px' }}>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>
+                      Рекомендации не загружены
+                    </div>
+                    <div style={{ color: '#c7c2c9', fontSize: '0.85rem', marginBottom: '16px', maxWidth: '480px', margin: '0 auto 16px' }}>
+                      Подключите Cookie вашего YouTube Music аккаунта, чтобы колонка составила ваш «Мой супермикс», «Быстрый выбор» и историю прослушиваний.
+                    </div>
+                    <button
+                      type="button"
+                      className="m3-btn m3-btn-primary"
+                      onClick={() => setIsYtCookieModalOpen(true)}
+                    >
+                      <span className="material-symbols-rounded">login</span>
+                      <span>Подключить аккаунт</span>
+                    </button>
+                  </div>
+                ) : (
+                  ytHomeSections.map((sec, sIdx) => (
+                    <div key={sIdx} className="m3-surface-card" style={{ padding: '16px 20px' }}>
+                      <div className="m3-card-title" style={{ marginBottom: '14px', fontSize: '0.96rem' }}>
+                        <span className="material-symbols-rounded" style={{ color: '#ffb4c2', fontSize: '20px' }}>flare</span>
+                        <span>{sec.title}</span>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '10px' }}>
+                        {sec.items.map((t: any, tIdx: number) => (
+                          <div
+                            key={tIdx}
+                            style={{
+                              background: '#19171e',
+                              borderRadius: '14px',
+                              padding: '10px 12px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '10px',
+                            }}
+                          >
+                            {t.artwork_url ? (
+                              <img src={t.artwork_url} alt="" style={{ width: '44px', height: '44px', borderRadius: '10px', objectFit: 'cover' }} />
+                            ) : (
+                              <div style={{ width: '44px', height: '44px', borderRadius: '10px', background: '#282430', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>music_note</span>
+                              </div>
+                            )}
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {t.title}
+                              </div>
+                              <div style={{ fontSize: '0.74rem', color: '#9d96a2', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {t.artist}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className="m3-btn m3-btn-primary"
+                              style={{ padding: '6px 12px', fontSize: '0.75rem' }}
+                              onClick={() => handlePlayYtTrack(t)}
+                            >
+                              <span className="material-symbols-rounded" style={{ fontSize: '16px' }}>play_arrow</span>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* ----------------- SUBTAB: LIKED SONGS ----------------- */}
+            {ytSubTab === 'liked' && (
+              <div className="m3-surface-card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <div className="m3-card-title">
+                    <span className="material-symbols-rounded" style={{ color: '#e91e63' }}>favorite</span>
+                    <span>Понравившиеся треки ({ytLikedSongs.length})</span>
+                  </div>
+                  <button type="button" className="m3-btn m3-btn-tonal" onClick={fetchYtLiked} disabled={ytLoading}>
+                    <span className="material-symbols-rounded">refresh</span>
+                    <span>Обновить</span>
+                  </button>
+                </div>
+                {ytLikedSongs.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '32px', color: '#8e8893' }}>
+                    {ytLoading ? 'Загрузка списка понравившихся треков...' : 'Список пуст или требуется подключить Cookie YouTube Music.'}
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {ytLikedSongs.map((t, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          background: '#18161c',
+                          borderRadius: '12px',
+                          padding: '10px 14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '12px',
+                        }}
+                      >
+                        {t.artwork_url ? (
+                          <img src={t.artwork_url} alt="" style={{ width: '42px', height: '42px', borderRadius: '8px', objectFit: 'cover' }} />
+                        ) : null}
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontWeight: 700, fontSize: '0.86rem', color: '#fff' }}>{t.title}</div>
+                          <div style={{ fontSize: '0.75rem', color: '#9d96a2' }}>{t.artist}</div>
+                        </div>
+                        <button
+                          type="button"
+                          className="m3-btn m3-btn-primary"
+                          style={{ padding: '6px 14px', fontSize: '0.78rem' }}
+                          onClick={() => handlePlayYtTrack(t)}
+                        >
+                          <span className="material-symbols-rounded" style={{ fontSize: '16px' }}>play_arrow</span>
+                          <span>Слушать</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ----------------- SUBTAB: PLAYLISTS ----------------- */}
+            {ytSubTab === 'playlists' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {selectedYtPlaylist ? (
+                  <div className="m3-surface-card">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                      <button
+                        type="button"
+                        className="m3-btn m3-btn-icon"
+                        onClick={() => setSelectedYtPlaylist(null)}
+                      >
+                        <span className="material-symbols-rounded">arrow_back</span>
+                      </button>
+                      <div>
+                        <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#fff' }}>
+                          {selectedYtPlaylist.title}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: '#ffb4c2' }}>
+                          {selectedYtPlaylist.subtitle || 'Плейлист YouTube Music'} • {ytPlaylistTracks.length} треков
+                        </div>
+                      </div>
+                    </div>
+
+                    {ytLoading && ytPlaylistTracks.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '30px', color: '#ffb4c2' }}>Загрузка треков плейлиста...</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {ytPlaylistTracks.map((t, idx) => (
+                          <div
+                            key={idx}
+                            style={{
+                              background: '#18161c',
+                              borderRadius: '12px',
+                              padding: '10px 14px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '12px',
+                            }}
+                          >
+                            {t.artwork_url && (
+                              <img src={t.artwork_url} alt="" style={{ width: '40px', height: '40px', borderRadius: '8px', objectFit: 'cover' }} />
+                            )}
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontWeight: 700, fontSize: '0.86rem', color: '#fff' }}>{t.title}</div>
+                              <div style={{ fontSize: '0.75rem', color: '#9d96a2' }}>{t.artist}</div>
+                            </div>
+                            <button
+                              type="button"
+                              className="m3-btn m3-btn-primary"
+                              style={{ padding: '6px 14px', fontSize: '0.78rem' }}
+                              onClick={() => handlePlayYtTrack(t)}
+                            >
+                              <span className="material-symbols-rounded" style={{ fontSize: '16px' }}>play_arrow</span>
+                              <span>Play</span>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="m3-surface-card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                      <div className="m3-card-title">
+                        <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>queue_music</span>
+                        <span>Ваши плейлисты ({ytPlaylists.length})</span>
+                      </div>
+                      <button type="button" className="m3-btn m3-btn-tonal" onClick={fetchYtPlaylists} disabled={ytLoading}>
+                        <span className="material-symbols-rounded">refresh</span>
+                        <span>Обновить</span>
+                      </button>
+                    </div>
+
+                    {ytPlaylists.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '32px', color: '#8e8893' }}>
+                        {ytLoading ? 'Загрузка плейлистов...' : 'Плейлисты не найдены. Подключите Cookie аккаунта.'}
+                      </div>
+                    ) : (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '12px' }}>
+                        {ytPlaylists.map((pl, idx) => (
+                          <div
+                            key={idx}
+                            onClick={() => fetchYtPlaylistTracks(pl)}
+                            style={{
+                              background: '#19171e',
+                              borderRadius: '16px',
+                              padding: '12px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '12px',
+                              transition: 'transform 0.15s ease',
+                            }}
+                          >
+                            {pl.artwork_url ? (
+                              <img src={pl.artwork_url} alt="" style={{ width: '56px', height: '56px', borderRadius: '12px', objectFit: 'cover' }} />
+                            ) : (
+                              <div style={{ width: '56px', height: '56px', borderRadius: '12px', background: '#282430', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <span className="material-symbols-rounded" style={{ color: '#ffb4c2', fontSize: '28px' }}>album</span>
+                              </div>
+                            )}
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {pl.title}
+                              </div>
+                              <div style={{ fontSize: '0.74rem', color: '#9d96a2', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {pl.subtitle || 'Плейлист'}
+                              </div>
+                            </div>
+                            <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>chevron_right</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* 3. Direct Stream URL & Presets */}
             <div className="m3-surface-card">
@@ -2843,6 +3316,103 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* ----------------- MODAL: YouTube Music Cookie Login ----------------- */}
+      {isYtCookieModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '20px',
+          }}
+          onClick={() => setIsYtCookieModalOpen(false)}
+        >
+          <div
+            className="m3-surface-card"
+            style={{
+              maxWidth: '560px',
+              width: '100%',
+              background: '#1d1b22',
+              boxShadow: '0 16px 40px rgba(0,0,0,0.6)',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="m3-card-header">
+              <div className="m3-card-title">
+                <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>account_circle</span>
+                <span>Подключение аккаунта YouTube Music</span>
+              </div>
+              <button
+                type="button"
+                className="m3-btn m3-btn-icon"
+                onClick={() => setIsYtCookieModalOpen(false)}
+              >
+                <span className="material-symbols-rounded">close</span>
+              </button>
+            </div>
+
+            <div style={{ fontSize: '0.86rem', color: '#c7c2c9', lineHeight: 1.6, marginBottom: '16px' }}>
+              Подключение вашего аккаунта открывает персональные подборки (<b>«Мой супермикс»</b>, <b>«Быстрый выбор»</b>),
+              доступ к вашим плейлистам и понравившимся трекам, а также гарантирует прямое воспроизведение без рекламы.
+            </div>
+
+            <div style={{ background: '#16141a', borderRadius: '12px', padding: '14px', marginBottom: '16px', fontSize: '0.8rem', color: '#ffb4c2' }}>
+              <div style={{ fontWeight: 700, marginBottom: '6px', color: '#fff' }}>Как получить Cookie:</div>
+              <ol style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <li>Откройте <b>music.youtube.com</b> в браузере с вашим аккаунтом.</li>
+                <li>Нажмите <b>F12</b> (DevTools) и перейдите на вкладку <b>«Сеть» (Network)</b>.</li>
+                <li>Обновите страницу (F5) и кликните по любому запросу (например, <code>browse</code>).</li>
+                <li>В заголовках запроса (Request Headers) найдите заголовок <b>Cookie</b>, скопируйте всю строку или значение <code>SAPISID</code>.</li>
+              </ol>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#a49ea8', marginBottom: '6px' }}>
+                Вставьте Cookie или значение SAPISID:
+              </label>
+              <textarea
+                className="m3-input"
+                rows={4}
+                placeholder="SAPISID=...; __Secure-3PAPISID=...; SID=... или просто вставьте всю строку Cookie из DevTools"
+                value={ytCookieInput}
+                onChange={(e) => setYtCookieInput(e.target.value)}
+                style={{ width: '100%', fontFamily: 'monospace', fontSize: '0.75rem', resize: 'vertical' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                className="m3-btn m3-btn-outlined"
+                onClick={() => setIsYtCookieModalOpen(false)}
+              >
+                <span>Отмена</span>
+              </button>
+              <button
+                type="button"
+                className="m3-btn m3-btn-primary"
+                onClick={handleSaveYtCookie}
+                disabled={!ytCookieInput.trim()}
+              >
+                <span className="material-symbols-rounded">check</span>
+                <span>Сохранить и подключить</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       </div>
     </div>
   );

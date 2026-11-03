@@ -527,6 +527,20 @@ fn default_sysfs_base() -> String {
     "/sys/class/leds".to_string()
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AccountsConfig {
+    #[serde(default)]
+    pub ytmusic_cookie: String,
+    #[serde(default)]
+    pub spotify_client_id: String,
+    #[serde(default)]
+    pub spotify_client_secret: String,
+    #[serde(default)]
+    pub spotify_refresh_token: String,
+    #[serde(default)]
+    pub soundcloud_token: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub server: ServerConfig,
@@ -537,6 +551,8 @@ pub struct AppConfig {
     pub proxy: ProxyConfig,
     pub audio: AudioConfig,
     pub hardware: HardwareConfig,
+    #[serde(default)]
+    pub accounts: AccountsConfig,
 }
 
 impl Default for AppConfig {
@@ -566,6 +582,7 @@ impl Default for AppConfig {
                 led_rings_count: default_led_rings(),
                 led_sysfs_base: default_sysfs_base(),
             },
+            accounts: AccountsConfig::default(),
         }
     }
 }

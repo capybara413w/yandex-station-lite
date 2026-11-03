@@ -25,14 +25,15 @@ impl DeepSeekService {
     pub fn new(config: Arc<RwLock<AppConfig>>, proxy: &ProxyConfig) -> Self {
         let mut builder = Client::builder().timeout(std::time::Duration::from_secs(45));
 
-        if proxy.enabled && !proxy.socks5_url.is_empty() {
-            match reqwest::Proxy::all(&proxy.socks5_url) {
+        if proxy.enabled {
+            let local_proxy = "http://127.0.0.1:8889";
+            match reqwest::Proxy::all(local_proxy) {
                 Ok(p) => {
-                    info!("Using SOCKS5 proxy for DeepSeek: {}", proxy.socks5_url);
+                    info!("Using local proxy bridge for DeepSeek: {}", local_proxy);
                     builder = builder.proxy(p);
                 }
                 Err(e) => {
-                    warn!("Failed to configure SOCKS5 proxy: {}", e);
+                    warn!("Failed to configure proxy for DeepSeek: {}", e);
                 }
             }
         }
