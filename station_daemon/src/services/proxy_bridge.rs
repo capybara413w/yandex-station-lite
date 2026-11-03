@@ -59,7 +59,7 @@ impl ProxyBridge {
                         let self_clone = self.clone();
                         tokio::spawn(async move {
                             if let Err(e) = self_clone.handle_client(stream).await {
-                                tracing::debug!("Proxy tunnel debug: {}", e);
+                                warn!("Proxy tunnel error: {}", e);
                             }
                         });
                     }

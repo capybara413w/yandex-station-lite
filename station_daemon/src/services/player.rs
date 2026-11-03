@@ -455,13 +455,13 @@ impl PlayerService {
                 };
                 if has_aplay {
                     format!(
-                        "{} -user_agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' {}-nostdin -loglevel error -nostats -i '{}' {}-f s16le -ac 2 -ar 48000 - -f s16le -ac 1 -ar 16000 'udp://127.0.0.1:7777?pkt_size=512' | {} -D hw:0,0 -f S16_LE -c 2 -r 48000 -",
-                        ffmpeg_bin, proxy_arg, safe_url, seek_arg, aplay_bin
+                        "{} -user_agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' {}-nostdin -loglevel error -nostats -i '{}' {}-f s16le -ac 2 -ar 48000 - {}-f s16le -ac 1 -ar 16000 'udp://127.0.0.1:7777?pkt_size=512' | {} -D hw:0,0 -f S16_LE -c 2 -r 48000 -",
+                        ffmpeg_bin, proxy_arg, safe_url, seek_arg, seek_arg, aplay_bin
                     )
                 } else {
                     format!(
-                        "{} -user_agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' {}-nostdin -loglevel error -nostats -i '{}' {}-f mp3 - -f s16le -ac 1 -ar 16000 'udp://127.0.0.1:7777?pkt_size=512' | {} -v -a hw:0,0 -f {} -",
-                        ffmpeg_bin, proxy_arg, safe_url, seek_arg, mpg123_bin, scale
+                        "{} -user_agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' {}-nostdin -loglevel error -nostats -i '{}' {}-f mp3 - {}-f s16le -ac 1 -ar 16000 'udp://127.0.0.1:7777?pkt_size=512' | {} -v -a hw:0,0 -f {} -",
+                        ffmpeg_bin, proxy_arg, safe_url, seek_arg, seek_arg, mpg123_bin, scale
                     )
                 }
             } else {

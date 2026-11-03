@@ -33,11 +33,18 @@
       outline: none !important;
     }
 
+    html {
+      overflow-y: auto;
+      overflow-x: hidden;
+      min-height: 100%;
+    }
+
     body {
       background-color: var(--md-sys-color-surface);
       color: var(--md-sys-color-on-surface);
       line-height: 1.5;
       min-height: 100vh;
+      overflow-y: auto;
       overflow-x: hidden;
       position: relative;
       isolation: isolate;
@@ -931,9 +938,12 @@
           <!-- Main Hero Player -->
           <div class="m3-surface-card" style="background: #1d1b22;">
             <div style="display: flex; gap: 28px; align-items: center; flex-wrap: wrap;">
-              <div style="width: 140px; height: 140px; border-radius: 24px; background: #28252e; display: flex; align-items: center; justify-content: center; flex-direction: column;">
-                <span class="material-symbols-rounded" style="font-size: 56px; color: #ffb4c2;" id="playerBigIcon">music_note</span>
-                <span style="font-size: 0.68rem; font-weight: 700; color: #78dc96; margin-top: 2px;" id="playerStateBadge">STOPPED</span>
+              <div style="width: 140px; height: 140px; border-radius: 24px; background: #28252e; display: flex; align-items: center; justify-content: center; flex-direction: column; overflow: hidden; position: relative;">
+                <img id="musicArtworkImg" src="" style="width: 100%; height: 100%; object-fit: cover; display: none;" onerror="this.style.display='none'; const p=document.getElementById('musicVinylPlaceholder'); if(p) p.style.display='flex';"/>
+                <div id="musicVinylPlaceholder" style="display: flex; align-items: center; justify-content: center; flex-direction: column; width: 100%; height: 100%;">
+                  <span class="material-symbols-rounded" style="font-size: 56px; color: #ffb4c2;" id="playerBigIcon">music_note</span>
+                  <span style="font-size: 0.68rem; font-weight: 700; color: #78dc96; margin-top: 2px;" id="playerStateBadge">STOPPED</span>
+                </div>
               </div>
 
               <div style="flex: 1; min-width: 280px;">
@@ -947,7 +957,7 @@
                 </div>
 
                 <div style="margin-top: 16px;">
-                  <input type="range" min="0" max="100" value="0" class="m3-slider" id="musicProgress" onchange="seekTrack(this.value)">
+                  <input type="range" min="0" max="100" value="0" class="m3-slider" id="musicProgress" oninput="onSeekInput(this.value)" onchange="onSeekChange(this.value)">
                   <div style="display: flex; justify-content: space-between; font-size: 0.78rem; color: #a49ea8; margin-top: 4px; font-weight: 600;">
                     <span id="musicCurTime">0:00</span>
                     <span id="musicTotalTime">0:00</span>
@@ -981,6 +991,36 @@
             </div>
           </div>
 
+          <!-- YouTube Music & Player SubTabs Bar -->
+          <div class="m3-surface-card" style="padding: 12px 18px; margin-bottom: 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;" id="ytSubTabsGroup">
+                <button type="button" class="m3-btn m3-btn-primary" id="btnSubTabSearch" onclick="switchYtSubTab('search')" style="padding: 8px 16px; border-radius: 9999px; font-size: 0.84rem; display: flex; align-items: center; gap: 6px;">
+                  <span class="material-symbols-rounded" style="font-size: 18px;">search</span>
+                  <span>Поиск</span>
+                </button>
+                <button type="button" class="m3-btn m3-btn-tonal" id="btnSubTabRecs" onclick="switchYtSubTab('recs')" style="padding: 8px 16px; border-radius: 9999px; font-size: 0.84rem; display: flex; align-items: center; gap: 6px;">
+                  <span class="material-symbols-rounded" style="font-size: 18px;">auto_awesome</span>
+                  <span>Рекомендации</span>
+                </button>
+                <button type="button" class="m3-btn m3-btn-tonal" id="btnSubTabLiked" onclick="switchYtSubTab('liked')" style="padding: 8px 16px; border-radius: 9999px; font-size: 0.84rem; display: flex; align-items: center; gap: 6px;">
+                  <span class="material-symbols-rounded" style="font-size: 18px;">favorite</span>
+                  <span>Понравившиеся</span>
+                </button>
+                <button type="button" class="m3-btn m3-btn-tonal" id="btnSubTabPlaylists" onclick="switchYtSubTab('playlists')" style="padding: 8px 16px; border-radius: 9999px; font-size: 0.84rem; display: flex; align-items: center; gap: 6px;">
+                  <span class="material-symbols-rounded" style="font-size: 18px;">queue_music</span>
+                  <span>Плейлисты</span>
+                </button>
+              </div>
+
+              <button type="button" id="ytAccountStatusBtn" onclick="openYtCookieModal()" style="padding: 6px 14px; border-radius: 9999px; border: 1px solid #ffa726; background: rgba(255, 167, 38, 0.12); color: #ffb74d; font-size: 0.8rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                <span class="material-symbols-rounded" style="font-size: 16px;" id="ytAccountIcon">account_circle</span>
+                <span id="ytAccountLabel">Войти в YouTube Music</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="subtabContentSearch">
           <!-- Multi-Source Music Search (YouTube Music, SoundCloud, Radio) -->
           <div class="m3-surface-card">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
@@ -1032,6 +1072,67 @@
             </div>
 
             <div id="musicResultsGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; margin-top: 10px;"></div>
+          </div>
+
+          </div>
+
+          <!-- SUBTAB: RECOMMENDATIONS -->
+          <div id="subtabContentRecs" style="display: none; flex-direction: column; gap: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="font-size: 1.05rem; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 8px;">
+                <span class="material-symbols-rounded" style="color: #ffb4c2;">auto_awesome</span>
+                <span>Персональный эфир и супермиксы</span>
+              </div>
+              <button type="button" class="m3-btn m3-btn-tonal" onclick="fetchYtHome()">
+                <span class="material-symbols-rounded">refresh</span>
+                <span>Обновить</span>
+              </button>
+            </div>
+            <div id="ytRecsContainer">
+              <div class="m3-surface-card" style="text-align: center; padding: 36px;">
+                <div style="font-size: 1.1rem; font-weight: 700; color: #fff; margin-bottom: 8px;">Рекомендации не загружены</div>
+                <div style="color: #c7c2c9; font-size: 0.85rem; margin-bottom: 16px;">Подключите Cookie вашего YouTube Music аккаунта, чтобы здесь появились ваши супермиксы и персональные подборки.</div>
+                <button type="button" class="m3-btn m3-btn-primary" onclick="openYtCookieModal()">Подключить аккаунт</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- SUBTAB: LIKED SONGS -->
+          <div id="subtabContentLiked" style="display: none;">
+            <div class="m3-surface-card">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <div class="m3-card-title">
+                  <span class="material-symbols-rounded" style="color: #e91e63;">favorite</span>
+                  <span id="ytLikedTitle">Понравившиеся треки</span>
+                </div>
+                <button type="button" class="m3-btn m3-btn-tonal" onclick="fetchYtLiked()">
+                  <span class="material-symbols-rounded">refresh</span>
+                  <span>Обновить</span>
+                </button>
+              </div>
+              <div id="ytLikedContainer" style="display: flex; flex-direction: column; gap: 8px;">
+                <div style="text-align: center; padding: 32px; color: #8e8893;">Загрузка списка понравившихся треков...</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SUBTAB: PLAYLISTS -->
+          <div id="subtabContentPlaylists" style="display: none; flex-direction: column; gap: 16px;">
+            <div class="m3-surface-card">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <div class="m3-card-title">
+                  <span class="material-symbols-rounded" style="color: #ffb4c2;">queue_music</span>
+                  <span id="ytPlaylistsTitle">Ваши плейлисты</span>
+                </div>
+                <button type="button" class="m3-btn m3-btn-tonal" onclick="fetchYtPlaylists()">
+                  <span class="material-symbols-rounded">refresh</span>
+                  <span>Обновить</span>
+                </button>
+              </div>
+              <div id="ytPlaylistsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;">
+                <div style="text-align: center; padding: 32px; color: #8e8893;">Загрузка плейлистов...</div>
+              </div>
+            </div>
           </div>
 
           <!-- Direct Stream URL -->
@@ -1468,6 +1569,51 @@
         </div>
       </div>
     </div>
+
+    <!-- YouTube Music Cookie Modal -->
+    <div id="ytCookieModal" class="m3-modal-backdrop" style="display: none;" onclick="closeYtCookieModal()">
+      <div class="m3-modal-card" style="max-width: 560px;" onclick="event.stopPropagation()">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 28px;">account_circle</span>
+            <h3 style="font-size: 1.25rem; font-weight: 700; color: #fff;">Аккаунт YouTube Music</h3>
+          </div>
+          <button type="button" style="background: transparent; color: #c7c2c9; cursor: pointer;" onclick="closeYtCookieModal()">
+            <span class="material-symbols-rounded">close</span>
+          </button>
+        </div>
+
+        <div style="font-size: 0.86rem; color: #c7c2c9; line-height: 1.55; margin-bottom: 16px;">
+          Подключение аккаунта активирует персональные миксы (<b>«Мой супермикс»</b>, <b>«Быстрый выбор»</b>),
+          ваши плейлисты и понравившиеся треки, а также гарантирует прямое чистое воспроизведение без рекламы.
+        </div>
+
+        <div style="background: #16141a; border-radius: 14px; padding: 14px 16px; margin-bottom: 16px; font-size: 0.8rem; color: #ffb4c2;">
+          <div style="font-weight: 700; margin-bottom: 6px; color: #fff;">Инструкция по получению Cookie:</div>
+          <ol style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px;">
+            <li>Откройте <b>music.youtube.com</b> в браузере под вашим Google-аккаунтом.</li>
+            <li>Нажмите <b>F12</b> (Инструменты разработчика) -> вкладка <b>Сеть (Network)</b>.</li>
+            <li>Обновите страницу (F5) и кликните по любому запросу (например <code>browse</code>).</li>
+            <li>В заголовках запроса (Request Headers) найдите заголовок <b>Cookie</b> и скопируйте всю строку или значение <code>SAPISID</code>.</li>
+          </ol>
+        </div>
+
+        <div style="margin-bottom: 18px;">
+          <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #a49ea8; margin-bottom: 6px;">
+            Вставьте Cookie или SAPISID:
+          </label>
+          <textarea id="ytCookieTextarea" class="m3-input" rows="4" style="width: 100%; font-family: monospace; font-size: 0.75rem; resize: vertical;" placeholder="Вставьте сюда JSON ([{...}]) из Cookie-Editor или строку Cookie"></textarea>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <button type="button" class="m3-btn m3-btn-tonal" onclick="closeYtCookieModal()">Отмена</button>
+          <button type="button" class="m3-btn m3-btn-primary" onclick="saveYtCookie()">
+            <span class="material-symbols-rounded">check</span>
+            <span>Сохранить и подключить</span>
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -1583,10 +1729,21 @@
             document.getElementById('playPauseText').innerText = isPlaying ? 'Пауза' : 'Воспроизведение';
           }
           if (d.track) {
-            document.getElementById('musicTrackTitle').innerText = d.track;
+            const trackEl = document.getElementById('musicTrackTitle');
+            if (trackEl) trackEl.innerText = d.track;
           }
           if (d.artist) {
-            document.getElementById('musicArtistTitle').innerText = d.artist;
+            const artistEl = document.getElementById('musicArtistTitle');
+            if (artistEl) artistEl.innerText = d.artist;
+          }
+          if (d.artwork_url) {
+            const artImg = document.getElementById('musicArtworkImg');
+            const placeholder = document.getElementById('musicVinylPlaceholder');
+            if (artImg) {
+              artImg.src = d.artwork_url;
+              artImg.style.display = 'block';
+            }
+            if (placeholder) placeholder.style.display = 'none';
           }
           if (d.station_ip) {
             document.getElementById('homeBadge').innerText = d.station_ip;
@@ -1600,10 +1757,53 @@
             const m = Math.floor((d.uptime_secs % 3600) / 60);
             document.getElementById('telemUptime').innerText = `${h} ч. ${m} мин.`;
           }
+          if (d.duration_secs !== undefined) {
+            const dur = Number(d.duration_secs) || 0;
+            const pos = Number(d.position_secs) || 0;
+            const progressEl = document.getElementById('musicProgress');
+            const curTimeEl = document.getElementById('musicCurTime');
+            const totalTimeEl = document.getElementById('musicTotalTime');
+            if (totalTimeEl) totalTimeEl.innerText = formatTime(dur);
+            if (progressEl) {
+              if (dur > 0) {
+                progressEl.max = dur;
+                if (!isUserSeeking) {
+                  progressEl.value = pos;
+                  if (curTimeEl) curTimeEl.innerText = formatTime(pos);
+                }
+              } else {
+                progressEl.max = 100;
+                if (!isUserSeeking) {
+                  progressEl.value = 0;
+                  if (curTimeEl) curTimeEl.innerText = '0:00';
+                }
+              }
+            }
+          }
         }
       } catch (e) {
         console.warn('Status fetch error:', e);
       }
+    }
+
+    function formatTime(sec) {
+      if (!sec || isNaN(sec) || sec < 0) return '0:00';
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      return `${m}:${s < 10 ? '0' : ''}${s}`;
+    }
+
+    let isUserSeeking = false;
+
+    function onSeekInput(val) {
+      isUserSeeking = true;
+      const curEl = document.getElementById('musicCurTime');
+      if (curEl) curEl.innerText = formatTime(Number(val));
+    }
+
+    async function onSeekChange(val) {
+      isUserSeeking = false;
+      await seekTrack(Number(val));
     }
 
     function onVolSliderChange(v) {
@@ -1639,6 +1839,7 @@
           body: JSON.stringify({ action })
         });
         fetchStatus();
+    fetchYtStatus();
       } catch (e) {
         console.error(e);
       }
@@ -1646,7 +1847,9 @@
 
     async function seekOffset(sec) {
       const cur = Number(document.getElementById('musicProgress').value || 0);
-      seekTrack(Math.max(0, cur + sec));
+      const max = Number(document.getElementById('musicProgress').max || 100);
+      const target = Math.max(0, Math.min(max, cur + sec));
+      await seekTrack(target);
     }
 
     async function seekTrack(sec) {
@@ -1756,6 +1959,10 @@
       const cleanArtist = (t.artist || '').split('•')[0].replace(/Video|Song|Track|\d+(\.\d+)?[MK]? views|\d+:\d+/gi, '').trim();
       if (cleanArtist && cleanArtist !== 'Unknown Artist' && cleanArtist !== 'YouTube Music') {
         playTarget += ' ' + cleanArtist;
+      }
+      if (src === 'ytmusic' && t.id) {
+        playYtTrack(t.id, t.title, t.artist, t.artwork_url, t.duration_seconds || 0);
+        return;
       }
       if (src === 'radio' && t.stream_url) {
         playTarget = t.stream_url;
@@ -2333,6 +2540,355 @@
     fetchStatus();
     loadAssistantConfig();
     setInterval(fetchStatus, 4000);
-  </script>
+  
+    // ==========================================
+    // YouTube Music SubTabs & Account Management
+    // ==========================================
+    let activeYtSubTab = 'search';
+    let isYtAuthenticated = false;
+
+    function switchYtSubTab(tab) {
+      activeYtSubTab = tab;
+      const subtabs = ['search', 'recs', 'liked', 'playlists'];
+      subtabs.forEach(t => {
+        const btn = document.getElementById('btnSubTab' + t.charAt(0).toUpperCase() + t.slice(1));
+        const view = document.getElementById('subtabContent' + t.charAt(0).toUpperCase() + t.slice(1));
+        if (btn) {
+          if (t === tab) {
+            btn.className = 'm3-btn m3-btn-primary';
+          } else {
+            btn.className = 'm3-btn m3-btn-tonal';
+          }
+        }
+        if (view) {
+          view.style.display = (t === tab) ? (t === 'search' ? 'block' : 'flex') : 'none';
+        }
+      });
+
+      if (tab === 'recs') fetchYtHome();
+      if (tab === 'liked') fetchYtLiked();
+      if (tab === 'playlists') fetchYtPlaylists();
+    }
+
+    function openYtCookieModal() {
+      document.getElementById('ytCookieModal').style.display = 'flex';
+    }
+
+    function closeYtCookieModal() {
+      document.getElementById('ytCookieModal').style.display = 'none';
+    }
+
+    async function fetchYtStatus() {
+      try {
+        const res = await fetch('/api/ytmusic/status');
+        if (res.ok) {
+          const d = await res.json();
+          if (d.success && d.status) {
+            isYtAuthenticated = d.status.is_authenticated;
+            const btn = document.getElementById('ytAccountStatusBtn');
+            const icon = document.getElementById('ytAccountIcon');
+            const label = document.getElementById('ytAccountLabel');
+            if (btn && icon && label) {
+              if (isYtAuthenticated) {
+                btn.style.border = '1px solid #4caf50';
+                btn.style.background = 'rgba(76, 175, 80, 0.12)';
+                btn.style.color = '#81c784';
+                icon.innerText = 'verified_user';
+                label.innerText = 'YouTube Music подключен';
+              } else {
+                btn.style.border = '1px solid #ffa726';
+                btn.style.background = 'rgba(255, 167, 38, 0.12)';
+                btn.style.color = '#ffb74d';
+                icon.innerText = 'account_circle';
+                label.innerText = 'Войти в YouTube Music';
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('YtStatus fetch error:', e);
+      }
+    }
+
+    async function saveYtCookie() {
+      let val = document.getElementById('ytCookieTextarea').value.trim();
+      if (!val) return;
+
+      if (val.startsWith('[') || val.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(val);
+          const list = Array.isArray(parsed) ? parsed : [parsed];
+          const pairs = list
+            .filter(item => item && (item.name || item.Name) && (item.value || item.Value))
+            .map(item => (item.name || item.Name) + '=' + (item.value || item.Value));
+          if (pairs.length > 0) {
+            val = pairs.join('; ');
+          }
+        } catch (e) {
+          console.warn('JSON cookie parse error:', e);
+        }
+      }
+
+      try {
+        const res = await fetch('/api/ytmusic/cookie', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cookie: val }),
+        });
+        const d = await res.json();
+        if (d.success) {
+          closeYtCookieModal();
+          document.getElementById('ytCookieTextarea').value = '';
+          fetchYtStatus();
+          alert('✅ Cookie YouTube Music успешно сохранен! Рекомендации и плейлисты активированы.');
+          if (activeYtSubTab === 'recs') fetchYtHome();
+          if (activeYtSubTab === 'liked') fetchYtLiked();
+          if (activeYtSubTab === 'playlists') fetchYtPlaylists();
+        } else {
+          alert('Ошибка: ' + (d.error || 'не удалось сохранить'));
+        }
+      } catch (e) {
+        alert('Ошибка соединения: ' + e.message);
+      }
+    }
+
+    async function fetchYtHome() {
+      const container = document.getElementById('ytRecsContainer');
+      if (!container) return;
+      container.innerHTML = '<div class="m3-surface-card" style="text-align: center; padding: 30px; color: #ffb4c2;">Загрузка рекомендаций и супермиксов...</div>';
+      try {
+        const res = await fetch('/api/ytmusic/home');
+        const d = await res.json();
+        if (d.success && d.sections && d.sections.length > 0) {
+          container.innerHTML = d.sections.map((sec, sIdx) => `
+            <div class="m3-surface-card" style="padding: 16px 20px; margin-bottom: 12px;">
+              <div class="m3-card-title" style="margin-bottom: 14px; font-size: 0.96rem;">
+                <span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 20px;">flare</span>
+                <span>${sec.title}</span>
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px;">
+                ${sec.items.map((t, tIdx) => `
+                  <div style="background: #19171e; border-radius: 14px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+                    ${t.artwork_url ? `<img src="${t.artwork_url}" style="width: 44px; height: 44px; border-radius: 10px; object-fit: cover;" onerror="this.style.display='none'"/>` : `<div style="width: 44px; height: 44px; border-radius: 10px; background: #282430; display: flex; align-items: center; justify-content: center;"><span class="material-symbols-rounded" style="color: #ffb4c2;">music_note</span></div>`}
+                    <div style="min-width: 0; flex: 1;">
+                      <div style="font-weight: 700; font-size: 0.85rem; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${t.title}</div>
+                      <div style="font-size: 0.74rem; color: #9d96a2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${t.artist}</div>
+                    </div>
+                    <button type="button" class="m3-btn m3-btn-primary" style="padding: 6px 12px; font-size: 0.75rem;"
+                      data-vid="${escapeAttr(t.id)}"
+                      data-title="${escapeAttr(t.title)}"
+                      data-artist="${escapeAttr(t.artist)}"
+                      data-artwork="${escapeAttr(t.artwork_url || '')}"
+                      data-duration="${t.duration_seconds || 0}"
+                      onclick="playYtBtn(this)">
+                      <span class="material-symbols-rounded" style="font-size: 16px;">play_arrow</span>
+                    </button>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `).join('');
+        } else {
+          container.innerHTML = `
+            <div class="m3-surface-card" style="text-align: center; padding: 36px;">
+              <div style="font-size: 1.1rem; font-weight: 700; color: #fff; margin-bottom: 8px;">Рекомендации не загружены</div>
+              <div style="color: #c7c2c9; font-size: 0.85rem; margin-bottom: 16px;">Подключите Cookie вашего YouTube Music аккаунта, чтобы колонка составила ваш «Мой супермикс».</div>
+              <button type="button" class="m3-btn m3-btn-primary" onclick="openYtCookieModal()">Подключить аккаунт</button>
+            </div>`;
+        }
+      } catch (e) {
+        container.innerHTML = '<div style="color: #ff5252; padding: 16px;">Ошибка загрузки рекомендаций.</div>';
+      }
+    }
+
+    async function fetchYtLiked() {
+      const container = document.getElementById('ytLikedContainer');
+      if (!container) return;
+      container.innerHTML = '<div style="text-align: center; padding: 32px; color: #8e8893;">Загрузка списка понравившихся треков...</div>';
+      try {
+        const res = await fetch('/api/ytmusic/liked?limit=50');
+        const d = await res.json();
+        if (d.success && d.tracks && d.tracks.length > 0) {
+          document.getElementById('ytLikedTitle').innerText = `Понравившиеся треки (${d.tracks.length})`;
+          container.innerHTML = d.tracks.map((t, idx) => `
+            <div style="background: #18161c; border-radius: 12px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+              ${t.artwork_url ? `<img src="${t.artwork_url}" style="width: 42px; height: 42px; border-radius: 8px; object-fit: cover;" onerror="this.style.display='none'"/>` : ''}
+              <div style="min-width: 0; flex: 1;">
+                <div style="font-weight: 700; font-size: 0.86rem; color: #fff;">${t.title}</div>
+                <div style="font-size: 0.75rem; color: #9d96a2;">${t.artist}</div>
+              </div>
+              <button type="button" class="m3-btn m3-btn-primary" style="padding: 6px 14px; font-size: 0.78rem;"
+                data-vid="${escapeAttr(t.id)}"
+                data-title="${escapeAttr(t.title)}"
+                data-artist="${escapeAttr(t.artist)}"
+                data-artwork="${escapeAttr(t.artwork_url || '')}"
+                data-duration="${t.duration_seconds || 0}"
+                onclick="playYtBtn(this)">
+                <span class="material-symbols-rounded" style="font-size: 16px;">play_arrow</span>
+                <span>Слушать</span>
+              </button>
+            </div>
+          `).join('');
+        } else {
+          container.innerHTML = '<div style="text-align: center; padding: 32px; color: #8e8893;">Понравившиеся треки не найдены. Подключите Cookie аккаунта.</div>';
+        }
+      } catch (e) {
+        container.innerHTML = '<div style="color: #ff5252; padding: 16px;">Ошибка загрузки понравившихся треков.</div>';
+      }
+    }
+
+    async function fetchYtPlaylists() {
+      const container = document.getElementById('ytPlaylistsContainer');
+      if (!container) return;
+      container.innerHTML = '<div style="text-align: center; padding: 32px; color: #8e8893;">Загрузка плейлистов...</div>';
+      try {
+        const res = await fetch('/api/ytmusic/playlists');
+        const d = await res.json();
+        if (d.success && d.playlists && d.playlists.length > 0) {
+          document.getElementById('ytPlaylistsTitle').innerText = `Ваши плейлисты (${d.playlists.length})`;
+          container.innerHTML = d.playlists.map(pl => `
+            <div data-id="${escapeAttr(pl.id)}" data-title="${escapeAttr(pl.title)}" data-sub="${escapeAttr(pl.subtitle || '')}" onclick="openYtPlaylistCard(this)" style="background: #19171e; border-radius: 16px; padding: 12px; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: transform 0.15s ease;">
+              ${pl.artwork_url ? `<img src="${pl.artwork_url}" style="width: 56px; height: 56px; border-radius: 12px; object-fit: cover;" onerror="this.style.display='none'"/>` : `<div style="width: 56px; height: 56px; border-radius: 12px; background: #282430; display: flex; align-items: center; justify-content: center;"><span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 28px;">album</span></div>`}
+              <div style="min-width: 0; flex: 1;">
+                <div style="font-weight: 700; font-size: 0.88rem; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${pl.title}</div>
+                <div style="font-size: 0.74rem; color: #9d96a2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${pl.subtitle || 'Плейлист'}</div>
+              </div>
+              <span class="material-symbols-rounded" style="color: #ffb4c2;">chevron_right</span>
+            </div>
+          `).join('');
+        } else {
+          container.innerHTML = '<div style="text-align: center; padding: 32px; color: #8e8893;">Плейлисты не найдены. Подключите Cookie аккаунта.</div>';
+        }
+      } catch (e) {
+        container.innerHTML = '<div style="color: #ff5252; padding: 16px;">Ошибка загрузки плейлистов.</div>';
+      }
+    }
+
+    async function fetchYtPlaylistTracks(playlistId, title, subtitle) {
+      const container = document.getElementById('ytPlaylistsContainer');
+      if (!container) return;
+      container.innerHTML = `
+        <div style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+            <button type="button" class="m3-btn m3-btn-tonal" onclick="fetchYtPlaylists()" style="padding: 6px 12px;">
+              <span class="material-symbols-rounded">arrow_back</span>
+              <span>Все плейлисты</span>
+            </button>
+            <div>
+              <div style="font-weight: 700; color: #fff; font-size: 1.05rem;">${title}</div>
+              <div style="font-size: 0.76rem; color: #ffb4c2;">${subtitle || 'Плейлист'}</div>
+            </div>
+          </div>
+          <div id="ytPlaylistTracksList" style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="padding: 24px; color: #8e8893; text-align: center;">Загрузка треков...</div>
+          </div>
+        </div>`;
+
+      try {
+        const res = await fetch(`/api/ytmusic/playlist/${encodeURIComponent(playlistId)}`);
+        const d = await res.json();
+        const list = document.getElementById('ytPlaylistTracksList');
+        if (list && d.success && d.tracks && d.tracks.length > 0) {
+          list.innerHTML = d.tracks.map((t, idx) => `
+            <div style="background: #18161c; border-radius: 12px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+              ${t.artwork_url ? `<img src="${t.artwork_url}" style="width: 40px; height: 40px; border-radius: 8px; object-fit: cover;" onerror="this.style.display='none'"/>` : ''}
+              <div style="min-width: 0; flex: 1;">
+                <div style="font-weight: 700; font-size: 0.86rem; color: #fff;">${t.title}</div>
+                <div style="font-size: 0.75rem; color: #9d96a2;">${t.artist}</div>
+              </div>
+              <button type="button" class="m3-btn m3-btn-primary" style="padding: 6px 14px; font-size: 0.78rem;"
+                data-vid="${escapeAttr(t.id)}"
+                data-title="${escapeAttr(t.title)}"
+                data-artist="${escapeAttr(t.artist)}"
+                data-artwork="${escapeAttr(t.artwork_url || '')}"
+                data-duration="${t.duration_seconds || 0}"
+                onclick="playYtBtn(this)">
+                <span class="material-symbols-rounded" style="font-size: 16px;">play_arrow</span>
+                <span>Слушать</span>
+              </button>
+            </div>
+          `).join('');
+        } else if (list) {
+          list.innerHTML = '<div style="padding: 24px; color: #8e8893; text-align: center;">В этом плейлисте пока нет треков.</div>';
+        }
+      } catch (e) {
+        const list = document.getElementById('ytPlaylistTracksList');
+        if (list) list.innerHTML = '<div style="color: #ff5252; padding: 16px;">Ошибка загрузки треков плейлиста.</div>';
+      }
+    }
+
+    function playYtBtn(btn) {
+      if (!btn || !btn.dataset) return;
+      playYtTrack(
+        btn.dataset.vid || '',
+        btn.dataset.title || '',
+        btn.dataset.artist || '',
+        btn.dataset.artwork || '',
+        Number(btn.dataset.duration || 0)
+      );
+    }
+
+    function openYtPlaylistCard(el) {
+      if (!el || !el.dataset) return;
+      fetchYtPlaylistTracks(el.dataset.id, el.dataset.title, el.dataset.sub);
+    }
+
+    async function playYtTrack(vid, title, artist, artworkUrl, durationSecs) {
+      const trackTitleEl = document.getElementById('musicTrackTitle');
+      if (trackTitleEl) trackTitleEl.innerText = title || 'Загрузка трека...';
+      const artistTitleEl = document.getElementById('musicArtistTitle');
+      if (artistTitleEl) artistTitleEl.innerText = artist || 'YouTube Music';
+
+      const artImg = document.getElementById('musicArtworkImg');
+      const placeholder = document.getElementById('musicVinylPlaceholder');
+      if (artImg) {
+        if (artworkUrl) {
+          artImg.src = artworkUrl;
+          artImg.style.display = 'block';
+          if (placeholder) placeholder.style.display = 'none';
+        } else {
+          artImg.style.display = 'none';
+          if (placeholder) placeholder.style.display = 'flex';
+        }
+      }
+      try {
+        const res = await fetch('/api/ytmusic/play', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            video_id: vid,
+            title: title,
+            artist: artist,
+            artwork_url: artworkUrl || null,
+            duration_seconds: durationSecs || 0
+          })
+        });
+        const d = await res.json();
+        if (!d.success) {
+          console.error('Playback failed:', d.error);
+        }
+        fetchStatus();
+      } catch (e) {
+        console.error('playYtTrack error:', e);
+      }
+    }
+
+    function escapeAttr(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function escapeJs(str) {
+      if (!str) return '';
+      return String(str).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    }
+
+
+    </script>
 </body>
 </html>

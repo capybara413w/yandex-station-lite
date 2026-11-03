@@ -31,6 +31,11 @@ timeout /t 2 /nobreak >nul
 
 set BINARY_PATH=station_daemon\target\aarch64-unknown-linux-musl\release\station_daemon
 if not exist "%BINARY_PATH%" (
+    if exist "station_daemon" (
+        set BINARY_PATH=station_daemon
+    )
+)
+if not exist "%BINARY_PATH%" (
     echo.
     echo [!] Бинарник %BINARY_PATH% не найден.
     echo     Пробуем скомпилировать через WSL cargo...

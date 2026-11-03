@@ -65,6 +65,127 @@ fn clean_yt_artist_string(raw: &str) -> String {
     }
 }
 
+fn clean_track_title(raw: &str) -> String {
+    let mut cleaned = String::new();
+    let mut i = 0;
+    let chars: Vec<char> = raw.chars().collect();
+    let len = chars.len();
+
+    while i < len {
+        let c = chars[i];
+        if c == '(' || c == '[' || c == '{' {
+            let close = match c {
+                '(' => ')',
+                '[' => ']',
+                _ => '}',
+            };
+            let mut j = i + 1;
+            let mut inside = String::new();
+            while j < len && chars[j] != close {
+                inside.push(chars[j]);
+                j += 1;
+            }
+            let inside_lower = inside.to_lowercase();
+            // Only strip brackets that contain metadata junk (feat, official, lyric, video, clip)
+            // DO NOT strip artist version indicators like "(версия Монеточки)", "(acoustic)", "(live)"
+            const JUNK_BRACKET_WORDS: &[&str] = &[
+                "feat", "ft.", "ft ", "featuring", "official", "lyric", "клип", "премьера", "видео", "hd", "hq", "4k"
+            ];
+            let is_junk = JUNK_BRACKET_WORDS.iter().any(|w| inside_lower.contains(w));
+            if is_junk {
+                i = if j < len { j + 1 } else { j };
+                cleaned.push(' ');
+            } else {
+                cleaned.push(' ');
+                cleaned.push_str(&inside);
+                cleaned.push(' ');
+                i = if j < len { j + 1 } else { j };
+            }
+        } else {
+            cleaned.push(c);
+            i += 1;
+        }
+    }
+
+    let trimmed = cleaned.split_whitespace().collect::<Vec<&str>>().join(" ");
+    if trimmed.is_empty() {
+        raw.trim().to_string()
+    } else {
+        trimmed
+    }
+}
+
+fn score_soundcloud_candidate(
+    candidate: &serde_json::Value,
+    target_title: &str,
+    target_artist: &str,
+    expected_dur_secs: Option<u64>,
+) -> i32 {
+    let c_title = candidate["title"].as_str().unwrap_or("").to_lowercase();
+    let c_user = candidate["user"]["username"].as_str().unwrap_or("").to_lowercase();
+    let c_desc = candidate["description"].as_str().unwrap_or("").to_lowercase();
+    let c_dur_secs = candidate["duration"].as_u64().unwrap_or(0) / 1000;
+
+    let t_title = target_title.to_lowercase();
+    let t_artist = target_artist.to_lowercase();
+
+    let mut score = 100i32;
+
+    // 1. Heavy penalty for unwanted bootlegs / remixes / speed-ups / pitch shifts in title OR uploader description
+    const JUNK_WORDS: &[&str] = &[
+        "speed up", "speedup", "sped up", "slowed", "reverb", "nightcore", "8d", "remix", "lofi", "lo-fi",
+        "cover", "karaoke", "instrumental", "bass boosted", "tribute", "parody", "pitched", "pitch",
+        "ускорен", "спидап", "замедлен", "реверб", "басс буст", "кавер", "караоке", "минусовка", "минус ", "ремикс",
+    ];
+    for jw in JUNK_WORDS {
+        if !t_title.contains(jw) {
+            if c_title.contains(jw) || c_desc.contains(jw) {
+                score -= 150;
+            }
+        }
+    }
+
+    // 2. Word matching for target title
+    let title_words: Vec<&str> = t_title
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 3)
+        .collect();
+    if !title_words.is_empty() {
+        let matched = title_words.iter().filter(|w| c_title.contains(*w)).count();
+        score += ((matched as f32 / title_words.len() as f32) * 80.0) as i32;
+    }
+
+    // 3. Artist match bonus
+    let artist_words: Vec<&str> = t_artist
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 3 && *w != "unknown" && *w != "music" && *w != "youtube")
+        .collect();
+    if !artist_words.is_empty() {
+        let matched = artist_words
+            .iter()
+            .any(|w| c_title.contains(*w) || c_user.contains(*w));
+        if matched {
+            score += 50;
+        }
+    }
+
+    // 4. Duration match
+    if let Some(exp_dur) = expected_dur_secs {
+        if exp_dur > 0 && c_dur_secs > 0 {
+            let diff = (c_dur_secs as i64 - exp_dur as i64).abs();
+            if diff <= 5 {
+                score += 40;
+            } else if diff <= 15 {
+                score += 20;
+            } else if diff > 60 {
+                score -= 60;
+            }
+        }
+    }
+
+    score
+}
+
 pub struct SoundCloudService {
     config: Arc<RwLock<AppConfig>>,
     client_id: Arc<RwLock<String>>,
@@ -375,9 +496,10 @@ impl SoundCloudService {
         let res = client
             .post("https://music.youtube.com/youtubei/v1/search")
             .header("Content-Type", "application/json")
+            .header("Accept-Encoding", "gzip, deflate, identity")
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
             .json(&body)
-            .timeout(std::time::Duration::from_secs(6))
+            .timeout(std::time::Duration::from_secs(12))
             .send()
             .await
             .map_err(|e| format!("YT Music request error: {}", e))?;
@@ -547,14 +669,110 @@ impl SoundCloudService {
         }
     }
 
-    /// Resolves best playable stream URL (progressive MP3 or HLS) for a search query
-    pub async fn resolve_best_stream(&self, query: &str) -> Result<ResolvedStream, String> {
+    async fn resolve_candidate_stream(
+        client: &Client,
+        cid: &str,
+        track: &serde_json::Value,
+        preferred_title: &str,
+        preferred_artist: &str,
+    ) -> Option<ResolvedStream> {
+        let track_auth = track["track_authorization"].as_str().unwrap_or("");
+        let duration_ms = track["duration"].as_u64().unwrap_or(0);
+        let artwork_url = track["artwork_url"].as_str().map(|s| s.to_string());
+        let transcodings = track["media"]["transcodings"].as_array()?;
+
+        // Prefer HLS (AAC 160k high fidelity), fallback to Progressive MP3
+        for prefer_hls in [true, false] {
+            for tr in transcodings {
+                let protocol = tr["format"]["protocol"].as_str().unwrap_or("");
+                let mime = tr["format"]["mime_type"].as_str().unwrap_or("");
+                let is_match = if prefer_hls {
+                    protocol == "hls"
+                } else {
+                    protocol == "progressive" && (mime.contains("mpeg") || mime.contains("mp3"))
+                };
+
+                if is_match {
+                    if let Some(tr_url) = tr["url"].as_str() {
+                        let stream_req_url = format!(
+                            "{}?client_id={}&track_authorization={}",
+                            tr_url, cid, track_auth
+                        );
+                        if let Ok(stream_res) = client
+                            .get(&stream_req_url)
+                            .header("Accept", "application/json, text/javascript, */*; q=0.01")
+                            .header("Origin", "https://soundcloud.com")
+                            .header("Referer", "https://soundcloud.com/")
+                            .send()
+                            .await
+                        {
+                            if let Ok(s_json) = stream_res.json::<serde_json::Value>().await {
+                                if let Some(final_url) = s_json["url"].as_str() {
+                                    return Some(ResolvedStream {
+                                        track_title: preferred_title.to_string(),
+                                        artist: preferred_artist.to_string(),
+                                        stream_url: final_url.to_string(),
+                                        is_hls: prefer_hls,
+                                        artwork_url: artwork_url.clone(),
+                                        duration_ms,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Intelligently resolves the best playable stream for a specific track title and artist,
+    /// avoiding remixes, speed-ups, karaoke, etc. and picking the closest duration match.
+    pub async fn resolve_best_match(
+        &self,
+        title: &str,
+        artist: &str,
+        expected_duration_secs: Option<u64>,
+    ) -> Result<ResolvedStream, String> {
+        let clean_t = clean_track_title(title);
+        let clean_a = if artist == "Unknown Artist" || artist == "YouTube Music" {
+            ""
+        } else {
+            artist.trim()
+        };
+
+        let primary_query = if !clean_a.is_empty() {
+            format!("{} {}", clean_t, clean_a)
+        } else {
+            clean_t.clone()
+        };
+
+        match self.search_and_pick_stream(&primary_query, title, artist, expected_duration_secs).await {
+            Ok(resolved) => Ok(resolved),
+            Err(e) => {
+                if !clean_a.is_empty() && clean_t != primary_query {
+                    info!("Trying secondary SoundCloud search for '{}' without artist due to: {}", clean_t, e);
+                    self.search_and_pick_stream(&clean_t, title, artist, expected_duration_secs).await
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    async fn search_and_pick_stream(
+        &self,
+        query: &str,
+        preferred_title: &str,
+        preferred_artist: &str,
+        expected_duration_secs: Option<u64>,
+    ) -> Result<ResolvedStream, String> {
         let q = query.trim();
         let client = self.build_client().await;
         let cid = self.get_client_id().await;
 
         let search_url = format!(
-            "https://api-v2.soundcloud.com/search/tracks?q={}&client_id={}&limit=5",
+            "https://api-v2.soundcloud.com/search/tracks?q={}&client_id={}&limit=10",
             urlencoding::encode(q),
             cid
         );
@@ -582,104 +800,34 @@ impl SoundCloudService {
             return Err(format!("No tracks found on SoundCloud for '{}'", q));
         }
 
-        // Priority Pass 1: Look for Progressive MP3 across all search results (plays natively with 0% CPU overhead)
-        for track in collection {
-            let title = track["title"].as_str().unwrap_or(q).to_string();
-            let artist = track["user"]["username"].as_str().unwrap_or("").to_string();
-            let artwork_url = track["artwork_url"].as_str().map(|s| s.to_string());
-            let track_auth = track["track_authorization"].as_str().unwrap_or("");
-            let duration_ms = track["duration"].as_u64().unwrap_or(0);
+        // Score all candidates
+        let mut scored_candidates: Vec<(i32, &serde_json::Value)> = collection
+            .iter()
+            .map(|t| (score_soundcloud_candidate(t, preferred_title, preferred_artist, expected_duration_secs), t))
+            .collect();
 
-            if let Some(transcodings) = track["media"]["transcodings"].as_array() {
-                for tr in transcodings {
-                    let protocol = tr["format"]["protocol"].as_str().unwrap_or("");
-                    let mime = tr["format"]["mime_type"].as_str().unwrap_or("");
-                    if protocol == "progressive" && (mime.contains("mpeg") || mime.contains("mp3")) {
-                        if let Some(tr_url) = tr["url"].as_str() {
-                            let stream_req_url = format!(
-                                "{}?client_id={}&track_authorization={}",
-                                tr_url, cid, track_auth
-                            );
-                            if let Ok(stream_res) = client
-                                .get(&stream_req_url)
-                                .header("Accept", "application/json, text/javascript, */*; q=0.01")
-                                .header("Origin", "https://soundcloud.com")
-                                .header("Referer", "https://soundcloud.com/")
-                                .send()
-                                .await
-                            {
-                                if let Ok(s_json) = stream_res.json::<serde_json::Value>().await {
-                                    if let Some(final_url) = s_json["url"].as_str() {
-                                        info!(
-                                            "Resolved Progressive MP3 stream for '{}' (by {})",
-                                            title, artist
-                                        );
-                                        return Ok(ResolvedStream {
-                                            track_title: title,
-                                            artist,
-                                            stream_url: final_url.to_string(),
-                                            is_hls: false,
-                                            artwork_url,
-                                            duration_ms,
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+        // Sort descending by score
+        scored_candidates.sort_by(|a, b| b.0.cmp(&a.0));
+
+        // Try to resolve stream for the best candidate first, then next best if it fails
+        for (score, candidate) in scored_candidates {
+            let cand_title = candidate["title"].as_str().unwrap_or("");
+            let cand_user = candidate["user"]["username"].as_str().unwrap_or("");
+            if let Some(stream) = Self::resolve_candidate_stream(&client, &cid, candidate, preferred_title, preferred_artist).await {
+                info!(
+                    "Picked SoundCloud candidate: '{}' by '{}' (score: {}) for target '{}' - '{}'",
+                    cand_title, cand_user, score, preferred_title, preferred_artist
+                );
+                return Ok(stream);
             }
         }
 
-        // Priority Pass 2: Fallback to HLS stream for top candidate
-        for track in collection {
-            let title = track["title"].as_str().unwrap_or(q).to_string();
-            let artist = track["user"]["username"].as_str().unwrap_or("").to_string();
-            let artwork_url = track["artwork_url"].as_str().map(|s| s.to_string());
-            let track_auth = track["track_authorization"].as_str().unwrap_or("");
-            let duration_ms = track["duration"].as_u64().unwrap_or(0);
+        Err(format!("Could not resolve playable stream for '{}' from search candidates", q))
+    }
 
-            if let Some(transcodings) = track["media"]["transcodings"].as_array() {
-                for tr in transcodings {
-                    let protocol = tr["format"]["protocol"].as_str().unwrap_or("");
-                    if protocol == "hls" {
-                        if let Some(tr_url) = tr["url"].as_str() {
-                            let stream_req_url = format!(
-                                "{}?client_id={}&track_authorization={}",
-                                tr_url, cid, track_auth
-                            );
-                            if let Ok(stream_res) = client
-                                .get(&stream_req_url)
-                                .header("Accept", "application/json, text/javascript, */*; q=0.01")
-                                .header("Origin", "https://soundcloud.com")
-                                .header("Referer", "https://soundcloud.com/")
-                                .send()
-                                .await
-                            {
-                                if let Ok(s_json) = stream_res.json::<serde_json::Value>().await {
-                                    if let Some(final_url) = s_json["url"].as_str() {
-                                        info!(
-                                            "Resolved HLS stream for '{}' (by {})",
-                                            title, artist
-                                        );
-                                        return Ok(ResolvedStream {
-                                            track_title: title,
-                                            artist,
-                                            stream_url: final_url.to_string(),
-                                            is_hls: true,
-                                            artwork_url,
-                                            duration_ms,
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Err(format!("Could not resolve playable stream for '{}'", q))
+    /// Resolves best playable stream URL (progressive MP3 or HLS) for a search query
+    pub async fn resolve_best_stream(&self, query: &str) -> Result<ResolvedStream, String> {
+        self.resolve_best_match(query, "", None).await
     }
 
     /// Resolves stream for a specific track by its SoundCloud track ID

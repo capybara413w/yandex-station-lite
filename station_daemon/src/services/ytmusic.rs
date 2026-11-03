@@ -61,7 +61,8 @@ impl YtMusicService {
     async fn build_client(&self) -> Client {
         let cfg = self.config.read().await;
         let mut builder = Client::builder()
-            .timeout(std::time::Duration::from_secs(15));
+            .timeout(std::time::Duration::from_secs(20))
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
 
         if cfg.proxy.enabled {
             let local_proxy = "http://127.0.0.1:8889";
@@ -73,8 +74,31 @@ impl YtMusicService {
         builder.build().unwrap_or_else(|_| Client::new())
     }
 
-    /// Extracts SAPISID or __Secure-3PAPISID from cookie string
+    /// Extracts SAPISID or __Secure-3PAPISID from cookie string or JSON export
     fn extract_sapisid(cookie: &str) -> Option<String> {
+        let trimmed = cookie.trim();
+        if trimmed.starts_with('[') || trimmed.starts_with('{') {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                let items: Vec<&serde_json::Value> = if let Some(arr) = val.as_array() {
+                    arr.iter().collect()
+                } else if val.is_object() {
+                    vec![&val]
+                } else {
+                    Vec::new()
+                };
+
+                for it in items {
+                    let name = it.get("name").or_else(|| it.get("Name")).and_then(|v| v.as_str()).unwrap_or("");
+                    let lower = name.to_lowercase();
+                    if lower == "sapisid" || lower == "__secure-3papisid" || lower == "__secure-1papisid" {
+                        if let Some(v) = it.get("value").or_else(|| it.get("Value")).and_then(|v| v.as_str()) {
+                            return Some(v.trim().to_string());
+                        }
+                    }
+                }
+            }
+        }
+
         for part in cookie.split(';') {
             let trimmed = part.trim();
             if let Some((k, v)) = trimmed.split_once('=') {
@@ -112,6 +136,14 @@ impl YtMusicService {
         headers.insert(ORIGIN, HeaderValue::from_static(YTM_BASE_URL));
         headers.insert(REFERER, HeaderValue::from_static("https://music.youtube.com/"));
         headers.insert("x-origin", HeaderValue::from_static(YTM_BASE_URL));
+        headers.insert(
+            reqwest::header::ACCEPT_ENCODING,
+            HeaderValue::from_static("gzip, deflate, identity"),
+        );
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
 
         let cfg = self.config.read().await;
         let cookie = cfg.accounts.ytmusic_cookie.trim();
@@ -145,10 +177,35 @@ impl YtMusicService {
         }
     }
 
-    /// Saves user cookie in configuration
+    /// Saves user cookie in configuration (accepts raw string, cURL, or Cookie-Editor JSON)
     pub async fn update_cookie(&self, new_cookie: String) -> Result<(), String> {
+        let mut clean = new_cookie.trim().to_string();
+        if clean.starts_with('[') || clean.starts_with('{') {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&clean) {
+                let items: Vec<&serde_json::Value> = if let Some(arr) = val.as_array() {
+                    arr.iter().collect()
+                } else if val.is_object() {
+                    vec![&val]
+                } else {
+                    Vec::new()
+                };
+
+                let mut pairs = Vec::new();
+                for it in items {
+                    let name = it.get("name").or_else(|| it.get("Name")).and_then(|v| v.as_str());
+                    let value = it.get("value").or_else(|| it.get("Value")).and_then(|v| v.as_str());
+                    if let (Some(n), Some(v)) = (name, value) {
+                        pairs.push(format!("{}={}", n, v));
+                    }
+                }
+                if !pairs.is_empty() {
+                    clean = pairs.join("; ");
+                }
+            }
+        }
+
         let mut cfg = self.config.write().await;
-        cfg.accounts.ytmusic_cookie = new_cookie.trim().to_string();
+        cfg.accounts.ytmusic_cookie = clean;
         let save_path = if std::path::Path::new("/data").exists() {
             "/data/config.json"
         } else {
@@ -182,7 +239,7 @@ impl YtMusicService {
             "query": q
         });
 
-        let url = format!("{}/youtubei/v1/search?alt=json&key={}", YTM_BASE_URL, INNERTUBE_API_KEY);
+        let url = format!("{}/youtubei/v1/search", YTM_BASE_URL);
         let res = client
             .post(&url)
             .headers(headers)
@@ -295,7 +352,7 @@ impl YtMusicService {
             "browseId": "FEmusic_home"
         });
 
-        let url = format!("{}/youtubei/v1/browse?alt=json&key={}", YTM_BASE_URL, INNERTUBE_API_KEY);
+        let url = format!("{}/youtubei/v1/browse", YTM_BASE_URL);
         let res = client
             .post(&url)
             .headers(headers)
@@ -379,10 +436,10 @@ impl YtMusicService {
                     "gl": "RU"
                 }
             },
-            "browseId": "FEmusic_liked_videos"
+            "browseId": "VLLM"
         });
 
-        let url = format!("{}/youtubei/v1/browse?alt=json&key={}", YTM_BASE_URL, INNERTUBE_API_KEY);
+        let url = format!("{}/youtubei/v1/browse", YTM_BASE_URL);
         let res = client
             .post(&url)
             .headers(headers)
@@ -404,7 +461,8 @@ impl YtMusicService {
 
         let mut tracks = Vec::new();
         let contents = json
-            .pointer("/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/musicPlaylistShelfRenderer/contents")
+            .pointer("/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents/0/musicPlaylistShelfRenderer/contents")
+            .or_else(|| json.pointer("/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/musicPlaylistShelfRenderer/contents"))
             .and_then(|v| v.as_array());
 
         if let Some(list) = contents {
@@ -437,10 +495,10 @@ impl YtMusicService {
                     "gl": "RU"
                 }
             },
-            "browseId": "FEmusic_library_playlists"
+            "browseId": "FEmusic_liked_playlists"
         });
 
-        let url = format!("{}/youtubei/v1/browse?alt=json&key={}", YTM_BASE_URL, INNERTUBE_API_KEY);
+        let url = format!("{}/youtubei/v1/browse", YTM_BASE_URL);
         let res = client
             .post(&url)
             .headers(headers)
@@ -480,7 +538,7 @@ impl YtMusicService {
 
     /// Fetches tracks from a specific playlist ID
     pub async fn get_playlist_tracks(&self, playlist_id: &str) -> Result<Vec<YtTrack>, String> {
-        let browse_id = if playlist_id.starts_with("VL") {
+        let browse_id = if playlist_id.starts_with("VL") || playlist_id.starts_with("MPRE") || playlist_id.starts_with("FEmusic") {
             playlist_id.to_string()
         } else {
             format!("VL{}", playlist_id)
@@ -501,7 +559,7 @@ impl YtMusicService {
             "browseId": browse_id
         });
 
-        let url = format!("{}/youtubei/v1/browse?alt=json&key={}", YTM_BASE_URL, INNERTUBE_API_KEY);
+        let url = format!("{}/youtubei/v1/browse", YTM_BASE_URL);
         let res = client
             .post(&url)
             .headers(headers)
@@ -525,6 +583,8 @@ impl YtMusicService {
         let items = json
             .pointer("/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/musicPlaylistShelfRenderer/contents")
             .or_else(|| json.pointer("/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents/0/musicPlaylistShelfRenderer/contents"))
+            .or_else(|| json.pointer("/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/musicShelfRenderer/contents"))
+            .or_else(|| json.pointer("/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents/0/musicShelfRenderer/contents"))
             .and_then(|v| v.as_array());
 
         if let Some(list) = items {
@@ -548,11 +608,21 @@ impl YtMusicService {
         }
 
         let client = self.build_client().await;
-        let mut headers = self.build_headers().await;
-        headers.insert(
+        let mut android_headers = HeaderMap::new();
+        android_headers.insert(
             USER_AGENT,
             HeaderValue::from_static("com.google.android.apps.youtube.music/6.20.51 (Linux; U; Android 11) gzip"),
         );
+        android_headers.insert(
+            reqwest::header::ACCEPT_ENCODING,
+            HeaderValue::from_static("gzip, deflate, identity"),
+        );
+        android_headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+
+        let web_headers = self.build_headers().await;
 
         // Try ANDROID_MUSIC client first for raw direct URLs
         let body = serde_json::json!({
@@ -568,10 +638,10 @@ impl YtMusicService {
             "videoId": vid
         });
 
-        let url = format!("{}/youtubei/v1/player?alt=json&key={}", YTM_BASE_URL, INNERTUBE_API_KEY);
+        let url = format!("{}/youtubei/v1/player", YTM_BASE_URL);
         let res = client
             .post(&url)
-            .headers(headers.clone())
+            .headers(android_headers)
             .json(&body)
             .send()
             .await
@@ -599,7 +669,7 @@ impl YtMusicService {
 
         let res_web = client
             .post(&url)
-            .headers(headers)
+            .headers(web_headers)
             .json(&web_body)
             .send()
             .await

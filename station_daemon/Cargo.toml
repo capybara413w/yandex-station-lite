@@ -1,6 +1,6 @@
 [package]
 name = "station_daemon"
-version = "0.1.0"
+version = "1.1.0"
 edition = "2021"
 authors = ["Yandex Station Lite Autonomous Project"]
 description = "Lightweight autonomous on-device daemon for Yandex Station Lite v1 (Amlogic A113X aarch64)"
@@ -15,7 +15,7 @@ tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
 tower = { version = "0.5", features = ["util"] }
 
 # HTTP Client with Rustls and built-in WebPKI root certificates (zero dependency on device /etc/ssl/certs)
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "socks", "json", "stream", "multipart"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "socks", "json", "stream", "multipart", "gzip"] }
 tokio-socks = "0.5"
 
 # Serialization

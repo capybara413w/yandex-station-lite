@@ -908,10 +908,13 @@ async fn ytmusic_play_handler(
         }
         Err(e) => {
             warn!("YouTube Music direct resolve error for {}: {}. Attempting audio stream fallback...", vid, e);
-            let query = format!("{} {}", title, artist);
-            match state.soundcloud.resolve_best_stream(&query).await {
+            match state.soundcloud.resolve_best_match(&title, &artist, payload.duration_seconds).await {
                 Ok(resolved) => {
-                    let dur_secs = resolved.duration_ms / 1000;
+                    let dur_secs = if resolved.duration_ms > 0 {
+                        resolved.duration_ms / 1000
+                    } else {
+                        payload.duration_seconds.unwrap_or(210)
+                    };
                     state.player.play_direct_stream(
                         &resolved.stream_url,
                         &title,
