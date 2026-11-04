@@ -1496,7 +1496,7 @@
               <div style="font-size: 0.85rem; font-weight: 700; color: #fff; margin-bottom: 10px;">Подключение к Wi-Fi сети:</div>
               <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px;">
                 <input type="text" id="wifiConnectSsid" class="m3-input" placeholder="Имя сети (SSID)">
-                <input type="password" id="wifiConnectPsk" class="m3-input" placeholder="Пароль сети">
+                <input type="password" id="wifiConnectPsk" class="m3-input" placeholder="Пароль сети (если есть)">
                 <button type="button" class="m3-btn m3-btn-primary" onclick="connectWifiManual()">
                   <span class="material-symbols-rounded">login</span>
                   <span>Подключиться</span>
@@ -1504,16 +1504,42 @@
               </div>
             </div>
 
+            <!-- Saved Networks Section -->
+            <div style="margin-bottom: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div style="font-size: 0.82rem; font-weight: 700; color: #a49ea8; display: flex; align-items: center; gap: 6px;">
+                  <span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 18px;">bookmark</span>
+                  <span>Сохраненные сети (wpa_supplicant):</span>
+                </div>
+                <button type="button" class="m3-btn m3-btn-tonal" style="font-size: 0.72rem; padding: 4px 10px;" onclick="fetchSavedWifi()">
+                  <span class="material-symbols-rounded" style="font-size: 15px;">refresh</span>
+                  <span>Обновить список</span>
+                </button>
+              </div>
+              <div id="wifiSavedContainer" style="display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto;">
+                <div style="text-align: center; padding: 12px; color: #8e8893; font-size: 0.82rem;">Загрузка сохраненных сетей...</div>
+              </div>
+            </div>
+
             <!-- Scanned Networks List -->
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-              <div style="font-size: 0.82rem; font-weight: 700; color: #a49ea8;">Доступные сети в эфире:</div>
-              <button type="button" class="m3-btn m3-btn-outlined" style="font-size: 0.72rem; padding: 4px 10px;" onclick="restartWifi()">
-                <span class="material-symbols-rounded" style="font-size: 15px;">restart_alt</span>
-                <span>Перезапустить Wi-Fi</span>
-              </button>
+              <div style="font-size: 0.82rem; font-weight: 700; color: #a49ea8; display: flex; align-items: center; gap: 6px;">
+                <span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 18px;">wifi_find</span>
+                <span>Доступные сети в эфире:</span>
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <button type="button" class="m3-btn m3-btn-tonal" style="font-size: 0.72rem; padding: 4px 10px;" onclick="scanWifi()">
+                  <span class="material-symbols-rounded" style="font-size: 15px;">sync</span>
+                  <span>Сканировать</span>
+                </button>
+                <button type="button" class="m3-btn m3-btn-outlined" style="font-size: 0.72rem; padding: 4px 10px;" onclick="restartWifi()">
+                  <span class="material-symbols-rounded" style="font-size: 15px;">restart_alt</span>
+                  <span>Перезапуск Wi-Fi</span>
+                </button>
+              </div>
             </div>
-            <div id="wifiNetworksContainer" style="display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto;">
-              <div style="text-align: center; padding: 16px; color: #8e8893; font-size: 0.82rem;">Нажмите «Поиск сетей» для сканирования радиоэфира.</div>
+            <div id="wifiNetworksContainer" style="display: flex; flex-direction: column; gap: 6px; max-height: 250px; overflow-y: auto;">
+              <div style="text-align: center; padding: 16px; color: #8e8893; font-size: 0.82rem;">Поиск доступных Wi-Fi сетей...</div>
             </div>
           </div>
 
@@ -1558,11 +1584,15 @@
           </div>
 
           <!-- Bluetooth Management -->
-          <div class="m3-surface-card">
+          <div class="m3-surface-card" style="position: relative; overflow: visible;">
+            <div class="m3-card-peeker-container" title="Пухляш настраивает Bluetooth :3">
+              <img class="m3-card-peeker" data-mascot="1" alt="Bluetooth Boykisser" />
+            </div>
             <div class="m3-card-header">
-              <div class="m3-card-title">
+              <div class="m3-card-title" style="display: flex; align-items: center; gap: 8px;">
                 <span class="material-symbols-rounded" style="color: #ffb4c2;">bluetooth</span>
                 <span>Управление Bluetooth (hci0 / Realtek UART)</span>
+                <img class="m3-boykisser-sticker" data-mascot="1" style="width: 26px; height: 26px;" alt=":3" title="Bluetooth Boykisser" />
               </div>
               <div style="display: flex; gap: 8px;">
                 <button type="button" class="m3-btn m3-btn-tonal" onclick="fetchBluetoothStatus()">
@@ -1577,7 +1607,7 @@
             </div>
 
             <!-- Bluetooth Adapter State -->
-            <div style="background: #17151a; border-radius: 14px; padding: 16px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+            <div style="background: #17151a; border-radius: 14px; padding: 16px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 12px;">
               <div>
                 <div style="font-size: 0.72rem; color: #8e8893;">Bluetooth Адаптер:</div>
                 <div id="btNameLabel" style="font-weight: 700; color: #fff; font-size: 1rem; margin-top: 2px;">Яндекс Лайт (hci0)</div>
@@ -1592,8 +1622,68 @@
               </div>
             </div>
 
-            <!-- Bluetooth Devices List -->
-            <div style="font-size: 0.82rem; font-weight: 700; color: #a49ea8; margin-bottom: 8px;">Найденные / сопряженные устройства:</div>
+            <!-- Speaker Mode (A2DP Sink / Phone Visibility) -->
+            <div style="background: #19161e; border: 1px solid rgba(255, 180, 194, 0.2); border-radius: 14px; padding: 16px; margin-bottom: 14px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div style="max-width: 520px;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 22px;">speaker_group</span>
+                    <span style="font-weight: 700; color: #fff; font-size: 0.95rem;">Режим аудиоколонки (Видимость для телефона / ПК)</span>
+                    <span id="btDiscoverableBadge" class="m3-badge" style="background: rgba(142, 136, 147, 0.2); color: #8e8893; font-size: 0.75rem; padding: 3px 8px;">НЕВИДИМА</span>
+                  </div>
+                  <div style="font-size: 0.8rem; color: #a49ea8; margin-top: 4px; line-height: 1.4;">
+                    Включите видимость, чтобы ваш телефон или ноутбук нашел станцию как <b>«Яндекс Лайт»</b> в поиске Bluetooth и транслировал музыку через динамик (BlueALSA A2DP Sink).
+                  </div>
+                </div>
+                <div>
+                  <button type="button" id="btDiscoverableToggleBtn" class="m3-btn m3-btn-primary" onclick="toggleBluetoothDiscoverable()">
+                    <span class="material-symbols-rounded">radar</span>
+                    <span id="btDiscoverableBtnText">Включить режим колонки</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Active Audio Connection Card -->
+            <div id="btActiveConnectionCard" style="display: none; background: rgba(120, 220, 150, 0.1); border: 1px solid rgba(120, 220, 150, 0.3); border-radius: 14px; padding: 14px 16px; margin-bottom: 14px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <span class="material-symbols-rounded" style="color: #78dc96; font-size: 28px;">smartphone</span>
+                  <div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span id="btConnectedDevName" style="font-weight: 700; color: #fff; font-size: 0.95rem;">Телефон</span>
+                      <span class="m3-badge" style="background: rgba(120, 220, 150, 0.2); color: #78dc96; font-size: 0.72rem; padding: 2px 8px;">ПОДКЛЮЧЕНО</span>
+                    </div>
+                    <div style="font-size: 0.75rem; color: #78dc96; margin-top: 2px;">
+                      <span id="btConnectedDevMac" style="font-family: monospace;">—</span> • Идет трансляция звука в колонку
+                    </div>
+                  </div>
+                </div>
+                <button type="button" class="m3-btn m3-btn-outlined" style="border-color: #ff5252; color: #ff5252;" onclick="disconnectActiveBtDevice()">
+                  <span class="material-symbols-rounded">link_off</span>
+                  <span>Отключить</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Paired / Saved Devices -->
+            <div style="margin-bottom: 14px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div style="font-size: 0.82rem; font-weight: 700; color: #a49ea8; display: flex; align-items: center; gap: 6px;">
+                  <span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 18px;">phonelink_ring</span>
+                  <span>Сопряженные устройства:</span>
+                </div>
+              </div>
+              <div id="btPairedDevicesContainer" style="display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto;">
+                <div style="text-align: center; padding: 12px; color: #8e8893; font-size: 0.82rem;">Сопряженных устройств нет</div>
+              </div>
+            </div>
+
+            <!-- Scanned / Discovered Devices List -->
+            <div style="font-size: 0.82rem; font-weight: 700; color: #a49ea8; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+              <span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 18px;">bluetooth_searching</span>
+              <span>Найденные Bluetooth устройства в эфире:</span>
+            </div>
             <div id="btDevicesContainer" style="display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto;">
               <div style="text-align: center; padding: 14px; color: #8e8893; font-size: 0.82rem;">Нажмите «Поиск устройств» для обнаружения активных Bluetooth гаджетов.</div>
             </div>
@@ -1877,6 +1967,8 @@
 
       if (tab === 'settings') {
         fetchWifiStatus();
+        fetchSavedWifi();
+        scanWifi();
         fetchPowersave();
         fetchBluetoothStatus();
       }
@@ -2434,38 +2526,143 @@
       } catch {}
     }
 
+    async function fetchSavedWifi() {
+      const c = document.getElementById('wifiSavedContainer');
+      if (!c) return;
+      try {
+        const res = await fetch('/api/wifi/saved');
+        if (res.ok) {
+          const d = await res.json();
+          const list = d.networks || [];
+          if (list.length === 0) {
+            c.innerHTML = '<div style="color: #8e8893; padding: 12px; text-align: center;">Сохраненных сетей в wpa_supplicant нет.</div>';
+            return;
+          }
+          c.innerHTML = list.map(n => {
+            const currentBadge = n.is_current
+              ? '<span class="m3-badge" style="background: rgba(120, 220, 150, 0.2); color: #78dc96; font-size: 0.72rem; padding: 2px 8px;">АКТИВНАЯ</span>'
+              : '';
+            const actionBtn = n.is_current
+              ? ''
+              : `<button type="button" class="m3-btn m3-btn-outlined" style="font-size: 0.72rem; padding: 4px 10px;" onclick="selectSavedWifi(${n.id}, '${n.ssid.replace(/'/g, "\\'")}')">
+                  <span class="material-symbols-rounded" style="font-size: 14px;">check</span>
+                  <span>Подключиться</span>
+                </button>`;
+
+            return `
+              <div style="background: #19171d; border-radius: 12px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 20px;">bookmark</span>
+                  <div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span style="font-weight: 700; font-size: 0.88rem; color: #fff;">${n.ssid}</span>
+                      ${currentBadge}
+                    </div>
+                    <div style="font-size: 0.72rem; color: #8e8893; font-family: monospace;">ID: #${n.id} • ${n.flags || 'WPA2'}</div>
+                  </div>
+                </div>
+                <div style="display: flex; gap: 6px;">
+                  ${actionBtn}
+                  <button type="button" class="m3-btn m3-btn-tonal" style="font-size: 0.72rem; padding: 4px 8px; color: #ff5252;" onclick="removeSavedWifi(${n.id}, '${n.ssid.replace(/'/g, "\\'")}')" title="Забыть сеть">
+                    <span class="material-symbols-rounded" style="font-size: 15px;">delete</span>
+                  </button>
+                </div>
+              </div>
+            `;
+          }).join('');
+        }
+      } catch (e) {
+        c.innerHTML = '<div style="color: #ff5252; padding: 12px; text-align: center;">Ошибка загрузки сохраненных сетей: ' + e.message + '</div>';
+      }
+    }
+
+    async function selectSavedWifi(id, ssid) {
+      try {
+        const res = await fetch('/api/wifi/select', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+        const d = await res.json();
+        if (d.success) {
+          alert('Переключение на сеть ' + ssid + ' отправлено!');
+          setTimeout(() => {
+            fetchWifiStatus();
+            fetchSavedWifi();
+          }, 3000);
+        } else {
+          alert('Ошибка переключения: ' + (d.error || 'неизвестно'));
+        }
+      } catch (e) {
+        alert('Ошибка запроса: ' + e.message);
+      }
+    }
+
+    async function removeSavedWifi(id, ssid) {
+      if (!confirm('Забыть и удалить сохраненную сеть «' + ssid + '» (# ' + id + ')?')) return;
+      try {
+        const res = await fetch('/api/wifi/remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+        const d = await res.json();
+        if (d.success) {
+          fetchSavedWifi();
+        } else {
+          alert('Ошибка удаления сети: ' + d.error);
+        }
+      } catch (e) {
+        alert('Ошибка: ' + e.message);
+      }
+    }
+
     async function scanWifi() {
       const c = document.getElementById('wifiNetworksContainer');
-      c.innerHTML = '<div style="color: #ffb4c2; padding: 12px; text-align: center;"><span class="material-symbols-rounded" style="animation: spin 1s linear infinite;">sync</span> Сканирование эфира...</div>';
+      c.innerHTML = '<div style="color: #ffb4c2; padding: 14px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 8px;"><span class="material-symbols-rounded" style="animation: spin 1s linear infinite;">sync</span> <span>Сканирование эфира Wi-Fi (wpa_cli)...</span></div>';
       try {
         const res = await fetch('/api/wifi/scan', { method: 'POST' });
         const data = await res.json();
         const list = data.networks || [];
         if (list.length === 0) {
-          c.innerHTML = '<div style="color: #8e8893; padding: 12px; text-align: center;">Сети не найдены. Попробуйте еще раз.</div>';
+          c.innerHTML = '<div style="color: #8e8893; padding: 14px; text-align: center;">Сети не найдены в эфире. Нажмите «Сканировать» еще раз.</div>';
           return;
         }
 
         c.innerHTML = list.map(n => {
-          const enc = n.flags.includes('WPA') ? '🔒 ' : '🔓 ';
+          const isSecured = n.flags.includes('WPA') || n.flags.includes('WEP');
+          const encIcon = isSecured ? 'lock' : 'lock_open';
           const sigPct = Math.max(10, Math.min(100, Math.round(2 * (n.signal_level_dbm + 100))));
+          const is5G = n.frequency_mhz >= 4900;
+          const bandBadge = is5G
+            ? '<span class="m3-badge" style="background: rgba(186, 147, 255, 0.2); color: #d0bcff; font-size: 0.68rem; padding: 1px 6px;">5 GHz</span>'
+            : '<span class="m3-badge" style="background: rgba(120, 220, 150, 0.15); color: #78dc96; font-size: 0.68rem; padding: 1px 6px;">2.4 GHz</span>';
+
+          const sigColor = n.signal_level_dbm >= -65 ? '#78dc96' : (n.signal_level_dbm >= -80 ? '#ffb049' : '#ff5252');
+
           return `
             <div style="background: #19171d; border-radius: 12px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
               <div style="display: flex; align-items: center; gap: 10px;">
                 <span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 20px;">wifi</span>
                 <div>
-                  <div style="font-weight: 700; font-size: 0.88rem; color: #fff;">${enc}${n.ssid}</div>
-                  <div style="font-size: 0.72rem; color: #8e8893; font-family: monospace;">${n.bssid} • ${n.frequency_mhz} MHz • ${n.signal_level_dbm} dBm (${sigPct}%)</div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-weight: 700; font-size: 0.88rem; color: #fff;">${n.ssid}</span>
+                    <span class="material-symbols-rounded" style="font-size: 15px; color: ${isSecured ? '#a49ea8' : '#78dc96'};">${encIcon}</span>
+                    ${bandBadge}
+                  </div>
+                  <div style="font-size: 0.72rem; color: #8e8893; font-family: monospace;">
+                    ${n.bssid} • ${n.frequency_mhz} MHz • <span style="color: ${sigColor}; font-weight: 700;">${n.signal_level_dbm} dBm (${sigPct}%)</span>
+                  </div>
                 </div>
               </div>
               <button type="button" class="m3-btn m3-btn-outlined" style="font-size: 0.75rem; padding: 4px 12px;" onclick="selectWifiNetwork('${n.ssid.replace(/'/g, "\\'")}')">
-                <span>Выбрать</span>
+                <span>Подключить</span>
               </button>
             </div>
           `;
         }).join('');
       } catch (e) {
-        c.innerHTML = '<div style="color: #ff5252; padding: 12px; text-align: center;">Ошибка сканирования: ' + e.message + '</div>';
+        c.innerHTML = '<div style="color: #ff5252; padding: 14px; text-align: center;">Ошибка сканирования: ' + e.message + '</div>';
       }
     }
 
@@ -2490,7 +2687,10 @@
         const d = await res.json();
         if (d.success) {
           alert('Подключение к ' + ssid + ' отправлено! Переподключаемся...');
-          setTimeout(fetchWifiStatus, 3000);
+          setTimeout(() => {
+            fetchWifiStatus();
+            fetchSavedWifi();
+          }, 3000);
         } else {
           alert('Ошибка подключения: ' + (d.error || 'неизвестно'));
         }
@@ -2504,7 +2704,10 @@
       try {
         await fetch('/api/wifi/restart', { method: 'POST' });
         alert('Команда перезапуска Wi-Fi отправлена');
-        setTimeout(fetchWifiStatus, 3000);
+        setTimeout(() => {
+          fetchWifiStatus();
+          fetchSavedWifi();
+        }, 3000);
       } catch {}
     }
 
@@ -2604,6 +2807,7 @@
     // -----------------------------------------------------------------------
 
     let btPowered = true;
+    let btDiscoverable = false;
 
     async function fetchBluetoothStatus() {
       try {
@@ -2611,8 +2815,12 @@
         if (res.ok) {
           const d = await res.json();
           btPowered = d.powered;
+          btDiscoverable = d.discoverable;
+
           document.getElementById('btNameLabel').innerText = (d.name || 'Яндекс Лайт') + ' (' + d.adapter + ')';
           document.getElementById('btAddressLabel').innerText = d.address || '—';
+
+          // Power badge & button
           const badge = document.getElementById('btPowerBadge');
           const btnText = document.getElementById('btToggleBtnText');
           if (btPowered) {
@@ -2627,6 +2835,40 @@
             btnText.innerText = 'Включить';
           }
 
+          // Discoverable (speaker mode) badge & button
+          const discBadge = document.getElementById('btDiscoverableBadge');
+          const discBtnText = document.getElementById('btDiscoverableBtnText');
+          const discBtn = document.getElementById('btDiscoverableToggleBtn');
+          if (btDiscoverable) {
+            discBadge.innerHTML = '<span class="material-symbols-rounded" style="font-size: 14px; animation: pulse 1.2s infinite;">radar</span> РЕЖИМ КОЛОНКИ АКТИВЕН';
+            discBadge.style.background = 'rgba(255, 180, 194, 0.25)';
+            discBadge.style.color = '#ffb4c2';
+            discBtnText.innerText = 'Выключить режим колонки';
+            discBtn.classList.remove('m3-btn-primary');
+            discBtn.classList.add('m3-btn-tonal');
+          } else {
+            discBadge.innerText = 'НЕВИДИМА';
+            discBadge.style.background = 'rgba(142, 136, 147, 0.2)';
+            discBadge.style.color = '#8e8893';
+            discBtnText.innerText = 'Включить режим колонки';
+            discBtn.classList.remove('m3-btn-tonal');
+            discBtn.classList.add('m3-btn-primary');
+          }
+
+          // Active audio connection card
+          const activeCard = document.getElementById('btActiveConnectionCard');
+          if (d.connected_device) {
+            activeCard.style.display = 'block';
+            document.getElementById('btConnectedDevName').innerText = d.connected_device.name || 'Подключенный телефон';
+            document.getElementById('btConnectedDevMac').innerText = d.connected_device.address;
+          } else {
+            activeCard.style.display = 'none';
+          }
+
+          // Render paired devices
+          renderBtPairedDevices(d.paired_devices || []);
+
+          // Render discovered devices if any
           if (d.devices && d.devices.length > 0) {
             renderBtDevices(d.devices);
           }
@@ -2650,23 +2892,85 @@
       }
     }
 
+    async function toggleBluetoothDiscoverable() {
+      try {
+        const nextState = !btDiscoverable;
+        const res = await fetch('/api/bluetooth/discoverable', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ discoverable: nextState })
+        });
+        const d = await res.json();
+        if (d.success) {
+          fetchBluetoothStatus();
+        } else {
+          alert('Ошибка переключения видимости: ' + (d.error || 'не удалось'));
+        }
+      } catch (e) {
+        alert('Ошибка: ' + e.message);
+      }
+    }
+
+    function renderBtPairedDevices(list) {
+      const c = document.getElementById('btPairedDevicesContainer');
+      if (!c) return;
+      if (list.length === 0) {
+        c.innerHTML = '<div style="color: #8e8893; padding: 12px; text-align: center;">Сопряженных устройств нет. Включите «Режим колонки» и подключитесь с телефона.</div>';
+        return;
+      }
+      c.innerHTML = list.map(dev => {
+        const statusBadge = dev.connected
+          ? '<span class="m3-badge" style="background: rgba(120, 220, 150, 0.2); color: #78dc96; font-size: 0.72rem; padding: 2px 8px;">ПОДКЛЮЧЕНО</span>'
+          : '<span class="m3-badge" style="background: rgba(142, 136, 147, 0.2); color: #a49ea8; font-size: 0.72rem; padding: 2px 8px;">СОПРЯЖЕНО</span>';
+
+        const connBtn = dev.connected
+          ? `<button type="button" class="m3-btn m3-btn-tonal" style="font-size: 0.72rem; padding: 4px 10px;" onclick="disconnectBtDevice('${dev.address}')">
+              <span>Отключить</span>
+            </button>`
+          : `<button type="button" class="m3-btn m3-btn-outlined" style="font-size: 0.72rem; padding: 4px 10px;" onclick="connectBtDevice('${dev.address}')">
+              <span>Подключить</span>
+            </button>`;
+
+        return `
+          <div style="background: #19171d; border-radius: 12px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 22px;">phone_android</span>
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-weight: 700; font-size: 0.88rem; color: #fff;">${dev.name || 'Безымянное устройство'}</span>
+                  ${statusBadge}
+                </div>
+                <div style="font-size: 0.72rem; color: #8e8893; font-family: monospace;">${dev.address}</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 6px;">
+              ${connBtn}
+              <button type="button" class="m3-btn m3-btn-tonal" style="font-size: 0.72rem; padding: 4px 8px; color: #ff5252;" onclick="removeBtDevice('${dev.address}')" title="Удалить / Забыть устройство">
+                <span class="material-symbols-rounded" style="font-size: 15px;">delete</span>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
     async function scanBluetooth() {
       const c = document.getElementById('btDevicesContainer');
-      c.innerHTML = '<div style="color: #ffb4c2; padding: 12px; text-align: center;"><span class="material-symbols-rounded" style="animation: spin 1s linear infinite;">bluetooth_searching</span> Поиск Bluetooth устройств поблизости (hcitool scan)...</div>';
+      c.innerHTML = '<div style="color: #ffb4c2; padding: 14px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 8px;"><span class="material-symbols-rounded" style="animation: spin 1s linear infinite;">bluetooth_searching</span> <span>Поиск Bluetooth устройств (bluetoothctl scan, 5 сек)...</span></div>';
       try {
         const res = await fetch('/api/bluetooth/scan', { method: 'POST' });
         const d = await res.json();
         const list = d.devices || [];
         renderBtDevices(list);
       } catch (e) {
-        c.innerHTML = '<div style="color: #ff5252; padding: 12px; text-align: center;">Ошибка поиска Bluetooth: ' + e.message + '</div>';
+        c.innerHTML = '<div style="color: #ff5252; padding: 14px; text-align: center;">Ошибка поиска Bluetooth: ' + e.message + '</div>';
       }
     }
 
     function renderBtDevices(list) {
       const c = document.getElementById('btDevicesContainer');
       if (list.length === 0) {
-        c.innerHTML = '<div style="color: #8e8893; padding: 12px; text-align: center;">Bluetooth устройства не обнаружены. Убедитесь, что устройство в режиме сопряжения.</div>';
+        c.innerHTML = '<div style="color: #8e8893; padding: 12px; text-align: center;">Bluetooth устройства не обнаружены. Убедитесь, что гаджет включен и находится в радиусе действия.</div>';
         return;
       }
       c.innerHTML = list.map(dev => `
@@ -2679,15 +2983,56 @@
             </div>
           </div>
           <div style="display: flex; gap: 6px;">
-            <button type="button" class="m3-btn m3-btn-outlined" style="font-size: 0.75rem; padding: 4px 10px;" onclick="connectBtDevice('${dev.address}')">
-              <span>Подключить</span>
+            <button type="button" class="m3-btn m3-btn-outlined" style="font-size: 0.75rem; padding: 4px 10px;" onclick="pairBtDevice('${dev.address}')">
+              <span>Сопрячь</span>
             </button>
-            <button type="button" class="m3-btn m3-btn-tonal" style="font-size: 0.75rem; padding: 4px 10px;" onclick="disconnectBtDevice('${dev.address}')">
-              <span>Отключить</span>
+            <button type="button" class="m3-btn m3-btn-primary" style="font-size: 0.75rem; padding: 4px 10px;" onclick="connectBtDevice('${dev.address}')">
+              <span>Подключить</span>
             </button>
           </div>
         </div>
       `).join('');
+    }
+
+    async function pairBtDevice(addr) {
+      try {
+        const res = await fetch('/api/bluetooth/pair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address: addr })
+        });
+        const d = await res.json();
+        alert(d.success ? 'Сопряжение с ' + addr + ' выполнено!' : 'Ошибка: ' + (d.error || 'не удалось'));
+        fetchBluetoothStatus();
+      } catch (e) {
+        alert('Ошибка: ' + e.message);
+      }
+    }
+
+    async function removeBtDevice(addr) {
+      if (!confirm('Удалить Bluetooth устройство ' + addr + ' из списка сопряженных?')) return;
+      try {
+        const res = await fetch('/api/bluetooth/remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address: addr })
+        });
+        const d = await res.json();
+        if (d.success) {
+          fetchBluetoothStatus();
+        } else {
+          alert('Ошибка удаления: ' + (d.error || 'не удалось'));
+        }
+      } catch (e) {
+        alert('Ошибка: ' + e.message);
+      }
+    }
+
+    async function disconnectActiveBtDevice() {
+      const mac = document.getElementById('btConnectedDevMac').innerText.trim();
+      if (mac && mac !== '—') {
+        disconnectBtDevice(mac);
+      }
     }
 
     async function connectBtDevice(addr) {
@@ -2699,6 +3044,7 @@
         });
         const d = await res.json();
         alert(d.success ? 'Подключение к ' + addr + ' выполнено!' : 'Ошибка: ' + (d.error || 'не удалось'));
+        fetchBluetoothStatus();
       } catch (e) {
         alert('Ошибка: ' + e.message);
       }
@@ -2713,6 +3059,7 @@
         });
         const d = await res.json();
         alert(d.success ? 'Устройство ' + addr + ' отключено' : 'Ошибка: ' + (d.error || 'не удалось'));
+        fetchBluetoothStatus();
       } catch (e) {
         alert('Ошибка: ' + e.message);
       }

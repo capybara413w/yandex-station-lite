@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -33,6 +34,15 @@ pub struct WifiApInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedWifiNetwork {
+    pub id: u32,
+    pub ssid: String,
+    pub bssid: String,
+    pub flags: String,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WifiPowerSaveParam {
     pub name: String,
     pub value: String,
@@ -63,6 +73,8 @@ pub struct BtDeviceInfo {
     pub name: String,
     pub connected: bool,
     pub paired: bool,
+    #[serde(default)]
+    pub trusted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,7 +85,9 @@ pub struct BluetoothStatus {
     pub name: String,
     pub powered: bool,
     pub discoverable: bool,
+    pub connected_device: Option<BtDeviceInfo>,
     pub devices: Vec<BtDeviceInfo>,
+    pub paired_devices: Vec<BtDeviceInfo>,
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +311,99 @@ impl NetworkHardware {
         Ok("Wi-Fi restart sequence initiated".to_string())
     }
 
+    /// Lists saved Wi-Fi networks in wpa_supplicant config
+    pub fn get_saved_wifi_networks(&self) -> Result<Vec<SavedWifiNetwork>, String> {
+        let output = Command::new("wpa_cli")
+            .args(["-i", "wlan0", "list_networks"])
+            .output()
+            .map_err(|e| format!("Failed to execute wpa_cli list_networks: {}", e))?;
+
+        if !output.status.success() {
+            return Err("wpa_cli list_networks returned error".to_string());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut results = Vec::new();
+
+        // format:
+        // network id / ssid / bssid / flags
+        // 0	AliceBridge	any	[DISABLED]
+        // 4	TP-Link_4107	any	[CURRENT]
+        for line in stdout.lines().skip(1) {
+            let cols: Vec<&str> = line.split('\t').collect();
+            if cols.len() >= 4 {
+                if let Ok(id) = cols[0].trim().parse::<u32>() {
+                    let ssid = cols[1].trim().to_string();
+                    let bssid = cols[2].trim().to_string();
+                    let flags = cols[3].trim().to_string();
+                    let is_current = flags.contains("[CURRENT]");
+                    // Filter out unprintable corrupted ssid if needed
+                    if !ssid.is_empty() {
+                        results.push(SavedWifiNetwork {
+                            id,
+                            ssid,
+                            bssid,
+                            flags,
+                            is_current,
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Switches connection to a previously configured network ID
+    pub fn select_saved_wifi_network(&self, id: u32) -> Result<String, String> {
+        info!("Selecting saved Wi-Fi network id #{}", id);
+        let id_str = id.to_string();
+
+        let _ = Command::new("wpa_cli")
+            .args(["-i", "wlan0", "enable_network", &id_str])
+            .output();
+
+        let out = Command::new("wpa_cli")
+            .args(["-i", "wlan0", "select_network", &id_str])
+            .output()
+            .map_err(|e| format!("wpa_cli select_network error: {}", e))?;
+
+        if !out.status.success() {
+            return Err(format!("wpa_cli failed to select network #{}", id));
+        }
+
+        let _ = Command::new("wpa_cli")
+            .args(["-i", "wlan0", "save_config"])
+            .output();
+
+        let _ = Command::new("sh")
+            .args(["-c", "dhcpcd wlan0 >/dev/null 2>&1 &"])
+            .output();
+
+        Ok(format!("Switched to network #{}", id))
+    }
+
+    /// Forgets / removes a saved Wi-Fi network from wpa_supplicant config
+    pub fn remove_saved_wifi_network(&self, id: u32) -> Result<String, String> {
+        info!("Removing saved Wi-Fi network id #{}", id);
+        let id_str = id.to_string();
+
+        let out = Command::new("wpa_cli")
+            .args(["-i", "wlan0", "remove_network", &id_str])
+            .output()
+            .map_err(|e| format!("wpa_cli remove_network error: {}", e))?;
+
+        if !out.status.success() {
+            return Err(format!("wpa_cli failed to remove network #{}", id));
+        }
+
+        let _ = Command::new("wpa_cli")
+            .args(["-i", "wlan0", "save_config"])
+            .output();
+
+        Ok(format!("Network #{} removed from wpa_supplicant", id))
+    }
+
     // -----------------------------------------------------------------------
     // Wi-Fi 88x2cs Power Saving (/sys/module/88x2cs/parameters/)
     // -----------------------------------------------------------------------
@@ -448,7 +555,9 @@ impl NetworkHardware {
             name: "Яндекс Лайт".to_string(),
             powered: false,
             discoverable: false,
+            connected_device: None,
             devices: Vec::new(),
+            paired_devices: Vec::new(),
         };
 
         // 1. Check via hciconfig
@@ -467,6 +576,9 @@ impl NetworkHardware {
                     if line.contains("UP RUNNING") || line.contains("UP") {
                         status.powered = true;
                     }
+                    if line.contains("PSCAN") && line.contains("ISCAN") {
+                        status.discoverable = true;
+                    }
                 }
             }
         }
@@ -484,28 +596,95 @@ impl NetworkHardware {
                     } else if trimmed.starts_with("Powered:") {
                         status.powered = trimmed[8..].trim() == "yes";
                     } else if trimmed.starts_with("Discoverable:") {
-                        status.discoverable = trimmed[13..].trim() == "yes";
+                        if trimmed[13..].trim() == "yes" {
+                            status.discoverable = true;
+                        }
                     }
                 }
             }
         }
 
-        // 3. Known / Paired devices
-        if let Ok(output) = Command::new("sh").args(["-c", "echo 'devices' | bluetoothctl 2>/dev/null"]).output() {
+        // 3. Find connected devices
+        let mut connected_addrs = HashSet::new();
+        if let Ok(output) = Command::new("bluetoothctl").args(["devices", "Connected"]).output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 let trimmed = line.trim();
-                // format: Device XX:XX:XX:XX:XX:XX DeviceName
                 if trimmed.starts_with("Device ") {
                     let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                    if parts.len() >= 3 {
+                    if parts.len() >= 2 {
                         let addr = parts[1].to_uppercase();
-                        let name = parts[2..].join(" ");
+                        let name = if parts.len() >= 3 {
+                            parts[2..].join(" ")
+                        } else {
+                            addr.clone()
+                        };
+                        connected_addrs.insert(addr.clone());
+                        if status.connected_device.is_none() {
+                            status.connected_device = Some(BtDeviceInfo {
+                                address: addr,
+                                name,
+                                connected: true,
+                                paired: true,
+                                trusted: true,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Find paired devices
+        let mut paired_addrs = HashSet::new();
+        if let Ok(output) = Command::new("bluetoothctl").args(["devices", "Paired"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("Device ") {
+                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let addr = parts[1].to_uppercase();
+                        let name = if parts.len() >= 3 {
+                            parts[2..].join(" ")
+                        } else {
+                            addr.clone()
+                        };
+                        paired_addrs.insert(addr.clone());
+                        let is_conn = connected_addrs.contains(&addr);
+                        status.paired_devices.push(BtDeviceInfo {
+                            address: addr,
+                            name,
+                            connected: is_conn,
+                            paired: true,
+                            trusted: true,
+                        });
+                    }
+                }
+            }
+        }
+
+        // 5. Query all devices (cached / paired)
+        if let Ok(output) = Command::new("bluetoothctl").arg("devices").output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("Device ") {
+                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let addr = parts[1].to_uppercase();
+                        let name = if parts.len() >= 3 {
+                            parts[2..].join(" ")
+                        } else {
+                            addr.clone()
+                        };
+                        let is_conn = connected_addrs.contains(&addr);
+                        let is_paired = paired_addrs.contains(&addr);
                         status.devices.push(BtDeviceInfo {
                             address: addr,
                             name,
-                            connected: false,
-                            paired: true,
+                            connected: is_conn,
+                            paired: is_paired,
+                            trusted: is_paired,
                         });
                     }
                 }
@@ -525,7 +704,6 @@ impl NetworkHardware {
             .map_err(|e| format!("hciconfig error: {}", e))?;
 
         if !out.status.success() {
-            // Also try bluetoothctl power on/off
             let btctl_arg = if power_on { "on" } else { "off" };
             let _ = Command::new("bluetoothctl").args(["power", btctl_arg]).output();
         }
@@ -533,42 +711,113 @@ impl NetworkHardware {
         Ok(())
     }
 
-    /// Scans for nearby Bluetooth devices via hcitool
-    pub fn scan_bluetooth(&self) -> Result<Vec<BtDeviceInfo>, String> {
-        info!("Starting Bluetooth scan...");
+    /// Toggles Bluetooth discoverable (pairing / speaker sink mode for phones)
+    pub fn set_bluetooth_discoverable(&self, discoverable: bool) -> Result<(), String> {
+        info!("Setting Bluetooth discoverable mode -> {}", discoverable);
         // Ensure hci0 is up
         let _ = Command::new("hciconfig").args(["hci0", "up"]).output();
 
-        let output = Command::new("sh")
-            .args(["-c", "timeout 6 hcitool scan 2>/dev/null"])
+        if discoverable {
+            let _ = Command::new("hciconfig").args(["hci0", "piscan"]).output();
+            let _ = Command::new("bluetoothctl").args(["discoverable", "on"]).output();
+            let _ = Command::new("bluetoothctl").args(["pairable", "on"]).output();
+        } else {
+            let _ = Command::new("hciconfig").args(["hci0", "noscan"]).output();
+            let _ = Command::new("bluetoothctl").args(["discoverable", "off"]).output();
+        }
+
+        Ok(())
+    }
+
+    /// Scans for nearby Bluetooth devices via bluetoothctl
+    pub fn scan_bluetooth(&self) -> Result<Vec<BtDeviceInfo>, String> {
+        info!("Starting Bluetooth scan (bluetoothctl --timeout 5 scan on)...");
+        // Ensure hci0 is up
+        let _ = Command::new("hciconfig").args(["hci0", "up"]).output();
+
+        // 1. Run 5-second scan natively supported by bluetoothctl 5.70
+        let _ = Command::new("bluetoothctl")
+            .args(["--timeout", "5", "scan", "on"])
+            .output();
+
+        // 2. Query sets of connected and paired devices
+        let mut connected_set = HashSet::new();
+        if let Ok(out) = Command::new("bluetoothctl").args(["devices", "Connected"]).output() {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let parts: Vec<&str> = line.trim().split_whitespace().collect();
+                if parts.len() >= 2 && parts[0] == "Device" {
+                    connected_set.insert(parts[1].to_uppercase());
+                }
+            }
+        }
+
+        let mut paired_set = HashSet::new();
+        if let Ok(out) = Command::new("bluetoothctl").args(["devices", "Paired"]).output() {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let parts: Vec<&str> = line.trim().split_whitespace().collect();
+                if parts.len() >= 2 && parts[0] == "Device" {
+                    paired_set.insert(parts[1].to_uppercase());
+                }
+            }
+        }
+
+        // 3. Query all discovered devices
+        let output = Command::new("bluetoothctl")
+            .arg("devices")
             .output()
-            .map_err(|e| format!("hcitool scan error: {}", e))?;
+            .map_err(|e| format!("bluetoothctl devices error: {}", e))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut results = Vec::new();
 
-        // format:
-        // Scanning ...
-        //   XX:XX:XX:XX:XX:XX  DeviceName
         for line in stdout.lines() {
             let trimmed = line.trim();
-            if trimmed.starts_with("Scanning") || trimmed.is_empty() {
-                continue;
-            }
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if parts.len() >= 2 {
-                let addr = parts[0].to_uppercase();
-                let name = parts[1..].join(" ");
-                results.push(BtDeviceInfo {
-                    address: addr,
-                    name,
-                    connected: false,
-                    paired: false,
-                });
+            if trimmed.starts_with("Device ") {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    let addr = parts[1].to_uppercase();
+                    let name = if parts.len() >= 3 {
+                        parts[2..].join(" ")
+                    } else {
+                        addr.clone()
+                    };
+                    let is_conn = connected_set.contains(&addr);
+                    let is_pair = paired_set.contains(&addr);
+                    results.push(BtDeviceInfo {
+                        address: addr,
+                        name,
+                        connected: is_conn,
+                        paired: is_pair,
+                        trusted: is_pair,
+                    });
+                }
             }
         }
 
         Ok(results)
+    }
+
+    /// Pairs and trusts a Bluetooth device by MAC address
+    pub fn pair_bluetooth(&self, mac: &str) -> Result<String, String> {
+        info!("Pairing and trusting Bluetooth device {}", mac);
+        let _ = Command::new("bluetoothctl").args(["pair", mac]).output();
+        let out = Command::new("bluetoothctl")
+            .args(["trust", mac])
+            .output()
+            .map_err(|e| format!("bluetoothctl trust error: {}", e))?;
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        Ok(stdout)
+    }
+
+    /// Removes / forgets a Bluetooth device by MAC address
+    pub fn remove_bluetooth(&self, mac: &str) -> Result<String, String> {
+        info!("Removing Bluetooth device {}", mac);
+        let out = Command::new("bluetoothctl")
+            .args(["remove", mac])
+            .output()
+            .map_err(|e| format!("bluetoothctl remove error: {}", e))?;
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        Ok(stdout)
     }
 
     /// Connects to a Bluetooth device by MAC address

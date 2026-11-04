@@ -164,6 +164,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/wifi/scan", get(scan_wifi_handler).post(scan_wifi_handler))
         .route("/api/wifi/connect", post(connect_wifi_handler))
         .route("/api/wifi/restart", post(restart_wifi_handler))
+        .route("/api/wifi/saved", get(get_saved_wifi_handler))
+        .route("/api/wifi/select", post(select_saved_wifi_handler))
+        .route("/api/wifi/remove", post(remove_saved_wifi_handler))
         // Wi-Fi 88x2cs Power Saving (/sys/module/88x2cs/parameters/)
         .route(
             "/api/wifi/powersave",
@@ -177,6 +180,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/bluetooth/status", get(get_bluetooth_status_handler))
         .route("/api/bluetooth/toggle", post(toggle_bluetooth_handler))
         .route(
+            "/api/bluetooth/discoverable",
+            post(set_bluetooth_discoverable_handler),
+        )
+        .route(
             "/api/bluetooth/scan",
             get(scan_bluetooth_handler).post(scan_bluetooth_handler),
         )
@@ -185,6 +192,8 @@ pub fn create_router(state: AppState) -> Router {
             "/api/bluetooth/disconnect",
             post(disconnect_bluetooth_handler),
         )
+        .route("/api/bluetooth/pair", post(pair_bluetooth_handler))
+        .route("/api/bluetooth/remove", post(remove_bluetooth_handler))
         // Terminal command execution
         .route("/api/terminal/run", post(terminal_run_handler))
         .route("/api/command", post(terminal_run_handler))
@@ -2491,6 +2500,74 @@ async fn restart_wifi_handler(State(state): State<AppState>) -> impl IntoRespons
     }
 }
 
+async fn get_saved_wifi_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match state.network.get_saved_wifi_networks() {
+        Ok(list) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "success": true, "networks": list })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": e, "networks": [] })),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct WifiNetworkIdPayload {
+    id: u32,
+}
+
+async fn select_saved_wifi_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<WifiNetworkIdPayload>,
+) -> impl IntoResponse {
+    match state.network.select_saved_wifi_network(payload.id) {
+        Ok(msg) => {
+            state
+                .logs
+                .push(
+                    "INFO",
+                    &format!("Switched to saved Wi-Fi network id #{}", payload.id),
+                )
+                .await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "success": true, "message": msg })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+    }
+}
+
+async fn remove_saved_wifi_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<WifiNetworkIdPayload>,
+) -> impl IntoResponse {
+    match state.network.remove_saved_wifi_network(payload.id) {
+        Ok(msg) => {
+            state
+                .logs
+                .push(
+                    "INFO",
+                    &format!("Removed saved Wi-Fi network id #{}", payload.id),
+                )
+                .await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "success": true, "message": msg })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Wi-Fi 88x2cs Power Saving Web Handlers
 // ---------------------------------------------------------------------------
@@ -2592,6 +2669,42 @@ async fn toggle_bluetooth_handler(
     }
 }
 
+#[derive(Deserialize)]
+struct BtDiscoverablePayload {
+    discoverable: bool,
+}
+
+async fn set_bluetooth_discoverable_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<BtDiscoverablePayload>,
+) -> impl IntoResponse {
+    match state
+        .network
+        .set_bluetooth_discoverable(payload.discoverable)
+    {
+        Ok(()) => {
+            state
+                .logs
+                .push(
+                    "INFO",
+                    &format!(
+                        "Bluetooth discoverable (speaker pairing mode) set to {}",
+                        payload.discoverable
+                    ),
+                )
+                .await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "success": true, "discoverable": payload.discoverable })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+    }
+}
+
 async fn scan_bluetooth_handler(State(state): State<AppState>) -> impl IntoResponse {
     match state.network.scan_bluetooth() {
         Ok(list) => (
@@ -2636,6 +2749,56 @@ async fn disconnect_bluetooth_handler(
     match state.network.disconnect_bluetooth(&payload.address) {
         Ok(out) => {
             state.logs.push("INFO", &format!("Disconnected from Bluetooth device {}", payload.address)).await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "success": true, "output": out })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+    }
+}
+
+async fn pair_bluetooth_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<BtDeviceActionPayload>,
+) -> impl IntoResponse {
+    match state.network.pair_bluetooth(&payload.address) {
+        Ok(out) => {
+            state
+                .logs
+                .push(
+                    "INFO",
+                    &format!("Paired with Bluetooth device {}", payload.address),
+                )
+                .await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "success": true, "output": out })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+    }
+}
+
+async fn remove_bluetooth_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<BtDeviceActionPayload>,
+) -> impl IntoResponse {
+    match state.network.remove_bluetooth(&payload.address) {
+        Ok(out) => {
+            state
+                .logs
+                .push(
+                    "INFO",
+                    &format!("Removed Bluetooth device {}", payload.address),
+                )
+                .await;
             (
                 StatusCode::OK,
                 Json(serde_json::json!({ "success": true, "output": out })),

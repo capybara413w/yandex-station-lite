@@ -1,8 +1,8 @@
 pub mod network;
 
 pub use network::{
-    BluetoothStatus, BtDeviceInfo, NetworkHardware, WifiApInfo, WifiPowerSaveConfig,
-    WifiPowerSaveParam, WifiStatus,
+    BluetoothStatus, BtDeviceInfo, NetworkHardware, SavedWifiNetwork, WifiApInfo,
+    WifiPowerSaveConfig, WifiPowerSaveParam, WifiStatus,
 };
 
 use crate::config::{AudioConfig, HardwareConfig};
