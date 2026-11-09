@@ -6,6 +6,22 @@
 
 ---
 
+## 📸 Интерфейс панели управления
+
+| Главная панель управления | Мультимедиа и YouTube Music |
+| :---: | :---: |
+| ![Главная панель](docs/screenshots/01_home_dashboard.png) | ![YouTube Music](docs/screenshots/02_youtube_music.png) |
+
+| Реактивный светомузыкальный визуализатор | Нейросетевой ассистент и LLM |
+| :---: | :---: |
+| ![Визуализатор LED](docs/screenshots/03_led_visualizer.png) | ![Голосовой ассистент](docs/screenshots/04_voice_assistant.png) |
+
+| Сеть, Wi-Fi и Bluetooth |
+| :---: |
+| ![Настройки сети](docs/screenshots/05_settings_network.png) |
+
+---
+
 ## 🌟 Основные возможности
 
 ### 1. Автономный демон на Rust (`station_daemon`)

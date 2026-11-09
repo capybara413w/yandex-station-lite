@@ -984,7 +984,7 @@ mod tests {
     async fn test_ytmusic_search() {
         let mut cfg = AppConfig::default();
         cfg.proxy.enabled = true;
-        cfg.proxy.socks5_url = "socks5://station:kiserStation2026@13.141.51.5:31080".to_string();
+        cfg.proxy.socks5_url = "socks5://user:password@127.0.0.1:1080".to_string();
         let svc = SoundCloudService::new(Arc::new(RwLock::new(cfg)));
         let res = svc.search_ytmusic_tracks("Linkin Park Numb", 5).await;
         println!("search_ytmusic_tracks result: {:?}", res);
