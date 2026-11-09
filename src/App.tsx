@@ -1840,7 +1840,7 @@ export default function App() {
                   className="m3-input"
                   placeholder={
                     musicSource === 'ytmusic'
-                      ? 'Поиск в YouTube Music (например: Кино Группа крови, Steven Universe, Phonk)...'
+                      ? 'Поиск в YouTube Music (например: Кино Группа крови, Ты не бойся ночи, Phonk)...'
                       : musicSource === 'soundcloud'
                       ? 'Поиск в SoundCloud (треки, ремиксы, диджеи)...'
                       : musicSource === 'radio'
@@ -1876,7 +1876,7 @@ export default function App() {
                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#8e8893' }}>Быстрый поиск:</span>
                 {[
                   { label: 'Кино — Группа крови', q: 'Кино Группа крови', src: 'ytmusic' },
-                  { label: 'Steven Universe', q: 'Steven Universe Love Like You', src: 'ytmusic' },
+                  { label: 'Ты не бойся ночи', q: 'Ты не бойся ночи ENZRO', src: 'ytmusic' },
                   { label: 'DVRST — Close Eyes', q: 'DVRST Close Eyes', src: 'ytmusic' },
                   { label: 'Chillhop Lo-Fi', q: 'Chillhop Lo-Fi Beats', src: 'radio' },
                   { label: 'Synthwave Radio', q: 'Cyberpunk Synthwave', src: 'radio' },

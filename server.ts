@@ -498,7 +498,7 @@ async function callDeepSeek(prompt: string): Promise<{ data: any | null; error: 
     }
     if (pLower.includes('включи') || pLower.includes('сыграй') || pLower.includes('поставь') || pLower.includes('песню') || pLower.includes('музык')) {
       let song = prompt.replace(/^(включи|сыграй|поставь|найди|песню)\s+/i, '').trim();
-      if (!song) song = 'Steven Universe Other Friends';
+      if (!song) song = 'ENZRO Ты не бойся ночи';
       return {
         data: { text: `Включаю ${song}.`, color: [180, 0, 255], action: 'play', song },
         error: null,

@@ -1182,7 +1182,7 @@
             </div>
 
             <div style="display: flex; gap: 10px;">
-              <input type="text" class="m3-input" id="musicSearchQuery" placeholder="Введите трек, артиста или стиль (например: DVRST, Phonk, Miyagi, Lo-Fi)..." onkeydown="if(event.key==='Enter') searchMusic()">
+              <input type="text" class="m3-input" id="musicSearchQuery" placeholder="Введите трек, артиста или стиль (например: Ты не бойся ночи, DVRST, Phonk)..." onkeydown="if(event.key==='Enter') searchMusic()">
               <button type="button" class="m3-btn m3-btn-primary" onclick="searchMusic()" style="min-width: 120px;">
                 <span class="material-symbols-rounded">search</span>
                 <span>Найти</span>
@@ -1195,6 +1195,7 @@
 
             <!-- Fast Chips -->
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button type="button" style="background: #18161c; color: #ffb4c2; border-radius: 9999px; padding: 5px 12px; font-size: 0.76rem; cursor: pointer;" onclick="quickMusicQuery('Ты не бойся ночи')">⚡ Ты не бойся ночи</button>
               <button type="button" style="background: #18161c; color: #a49ea8; border-radius: 9999px; padding: 5px 12px; font-size: 0.76rem; cursor: pointer;" onclick="quickMusicQuery('DVRST - Close Eyes')">⚡ DVRST</button>
               <button type="button" style="background: #18161c; color: #a49ea8; border-radius: 9999px; padding: 5px 12px; font-size: 0.76rem; cursor: pointer;" onclick="quickMusicQuery('Phonk Drift 2024')">⚡ Phonk Drift</button>
               <button type="button" style="background: #18161c; color: #a49ea8; border-radius: 9999px; padding: 5px 12px; font-size: 0.76rem; cursor: pointer;" onclick="quickMusicQuery('Chillhop Lo-Fi Beats')">⚡ Chillhop Lo-Fi</button>
