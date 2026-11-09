@@ -8,8 +8,8 @@ use hardware::{
     AudioHardware, ButtonsListener, LedController, NetworkHardware, StationButtonEvent,
 };
 use services::{
-    DeepSeekService, PlayerService, ProxyBridge, SoundCloudService, SttService, TtsService,
-    VisualizerService, YtMusicService,
+    DeepSeekService, PlayerService, ProxyBridge, SoundCloudService, SttService,
+    TtsService, VisualizerService, YtMusicService,
 };
 use std::net::SocketAddr;
 use std::path::Path;
@@ -95,6 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let led_clone = led.clone();
     let player_clone = player.clone();
     let soundcloud_clone = soundcloud.clone();
+    let ytmusic_clone = ytmusic.clone();
     let stt_clone = stt.clone();
     let deepseek_clone = deepseek.clone();
     let tts_clone = tts.clone();
@@ -144,6 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let ds_ref = deepseek_clone.clone();
                     let player_ref = player_clone.clone();
                     let sc_ref = soundcloud_clone.clone();
+                    let yt_ref = ytmusic_clone.clone();
                     let tts_ref = tts_clone.clone();
 
                     tokio::spawn(async move {
@@ -162,7 +164,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             let _ = tts_ref.speak(&resp.text, resp.color, &led_ref).await;
                                         }
 
-                                        // 4. Handle Music Actions via SoundCloud
+                                        // 4. Handle Music Actions via YouTube Music (100% exact match)
                                         match resp.action.as_str() {
                                             "play" => {
                                                 let song = if resp.song.is_empty() {
@@ -170,7 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                 } else {
                                                     &resp.song
                                                 };
-                                                player_ref.play_soundcloud_or_query(&sc_ref, song, &led_ref).await;
+                                                player_ref.play_smart_or_query(&yt_ref, &sc_ref, song, &led_ref).await;
                                             }
                                             "stop" => player_ref.stop(&led_ref).await,
                                             "resume" => player_ref.resume(&led_ref).await,

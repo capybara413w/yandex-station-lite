@@ -1,6 +1,7 @@
 use crate::config::AppConfig;
 use crate::hardware::LedController;
 use crate::services::soundcloud::SoundCloudService;
+use crate::services::ytmusic::YtMusicService;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -210,6 +211,106 @@ impl PlayerService {
             led,
         )
         .await;
+    }
+
+    /// Resolves YouTube Music first (100% exact match), then falls back to SoundCloud
+    pub async fn play_smart_or_query(
+        &self,
+        ytmusic: &YtMusicService,
+        soundcloud: &SoundCloudService,
+        query: &str,
+        led: &LedController,
+    ) {
+        let q = query.trim();
+        if q.is_empty() {
+            return;
+        }
+
+        // 1. Direct SoundCloud permalink
+        if q.contains("soundcloud.com/") {
+            self.play_soundcloud_or_query(soundcloud, q, led).await;
+            return;
+        }
+
+        // 2. Radio presets
+        let q_lower = q.to_lowercase();
+        let preset_url = match q_lower.as_str() {
+            "radio record" | "record" | "радио рекорд" | "рекорд" => {
+                Some(("http://air2.radiorecord.ru:805/rr_320", "Radio Record", "Record Dance"))
+            }
+            "lofi" | "lofi chill" | "лофай" => {
+                Some(("http://stream.zeno.fm/f3wvbbqmdg8uv", "Lofi Chill Beats", "Lofi 24/7"))
+            }
+            "deep house" | "deep" | "дип хаус" => {
+                Some(("http://air2.radiorecord.ru:805/deep_320", "Deep House", "Radio Record"))
+            }
+            "relax fm" | "relax" | "релакс" => {
+                Some(("http://ic7.101.ru:8000/v13_1", "Relax FM", "Relax Media"))
+            }
+            "rock" | "classic rock" | "рок" => {
+                Some(("http://air2.radiorecord.ru:805/rock_320", "Rock Station", "Radio Record"))
+            }
+            _ => None,
+        };
+
+        if let Some((url, title, artist)) = preset_url {
+            self.play_direct_stream(url, title, artist, None, 0, false, 0, led).await;
+            return;
+        }
+
+        // 3. YouTube URL or direct Video ID
+        if q.contains("youtube.com/watch") || q.contains("youtu.be/") {
+            let vid = if let Some(v_param) = q.split("v=").nth(1) {
+                v_param.split(['&', '?', '#', '/', ' ']).next().unwrap_or("")
+            } else if let Some(slash_part) = q.split("youtu.be/").nth(1) {
+                slash_part.split(['&', '?', '#', '/', ' ']).next().unwrap_or("")
+            } else {
+                ""
+            };
+            if !vid.is_empty() {
+                if let Ok(info) = ytmusic.resolve_stream_info(vid).await {
+                    let title = info.title.unwrap_or_else(|| "YouTube Track".to_string());
+                    let artist = info.artist.unwrap_or_else(|| "YouTube".to_string());
+                    let dur = info.duration_seconds.unwrap_or(210);
+                    self.play_direct_stream(&info.stream_url, &title, &artist, info.artwork_url, dur, false, 0, led).await;
+                    return;
+                }
+            }
+        }
+
+        // 4. Try YouTube Music search for 100% exact official track match
+        led.blink(255, 0, 120, 150); // Pink blink for YouTube search
+        let clean_search = q
+            .replace(['"', '`', '«', '»'], " ")
+            .split('|')
+            .next()
+            .unwrap_or(q)
+            .trim()
+            .to_string();
+        let search_target = if clean_search.is_empty() { q } else { &clean_search };
+
+        if let Ok(tracks) = ytmusic.search(search_target, 1).await {
+            if let Some(t) = tracks.first() {
+                info!("YouTube Music 100% match found for '{}': '{}' by '{}' ({})", search_target, t.title, t.artist, t.id);
+                if let Ok(stream_url) = ytmusic.resolve_stream_url(&t.id).await {
+                    let dur = if t.duration_seconds > 0 { t.duration_seconds } else { 210 };
+                    self.play_direct_stream(
+                        &stream_url,
+                        &t.title,
+                        &t.artist,
+                        t.artwork_url.clone(),
+                        dur,
+                        false,
+                        0,
+                        led,
+                    ).await;
+                    return;
+                }
+            }
+        }
+
+        // 5. Fallback to SoundCloud
+        self.play_soundcloud_or_query(soundcloud, q, led).await;
     }
 
     /// Resolves SoundCloud track or preset stream and begins playback

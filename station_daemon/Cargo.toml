@@ -3,11 +3,12 @@ name = "station_daemon"
 version = "1.1.0"
 edition = "2021"
 authors = ["Yandex Station Lite Autonomous Project"]
+license = "GPL-3.0-or-later"
 description = "Lightweight autonomous on-device daemon for Yandex Station Lite v1 (Amlogic A113X aarch64)"
 
 [dependencies]
 # Async runtime (optimized for minimal footprint on 238MB RAM)
-tokio = { version = "1.41", features = ["rt-multi-thread", "sync", "time", "io-util", "macros"] }
+tokio = { version = "1.41", features = ["rt-multi-thread", "sync", "time", "io-util", "macros", "process"] }
 
 # Lightweight Web Server & Static Files
 axum = { version = "0.7", default-features = false, features = ["tokio", "http1", "json", "query"] }

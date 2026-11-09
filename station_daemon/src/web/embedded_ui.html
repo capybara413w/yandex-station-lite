@@ -1688,6 +1688,7 @@
               </div>
             </div>
 
+
             <!-- Active Audio Connection Card -->
             <div id="btActiveConnectionCard" style="display: none; background: rgba(120, 220, 150, 0.1); border: 1px solid rgba(120, 220, 150, 0.3); border-radius: 14px; padding: 14px 16px; margin-bottom: 14px;">
               <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
@@ -1732,6 +1733,7 @@
               <div style="text-align: center; padding: 14px; color: #8e8893; font-size: 0.82rem;">Нажмите «Поиск устройств» для обнаружения активных Bluetooth гаджетов.</div>
             </div>
           </div>
+
 
           <!-- Station Info -->
           <div class="m3-surface-card">
@@ -1857,6 +1859,7 @@
         </div>
       </div>
     </div>
+
   </div>
 
   <script>
@@ -2272,17 +2275,31 @@
       const t = items[idx];
       if (!t) return;
       const src = t.source || 'ytmusic';
+
+      let vid = t.video_id;
+      if (!vid && typeof t.id === 'string' && t.id.length > 3 && t.id !== '0') {
+        vid = t.id;
+      }
+      if (!vid && t.permalink_url && t.permalink_url.includes('v=')) {
+        vid = t.permalink_url.split('v=')[1].split('&')[0];
+      }
+
+      if (src === 'ytmusic' || vid) {
+        if (vid) {
+          playYtTrack(vid, t.title, t.artist, t.artwork_url, t.duration_seconds || Math.round((t.duration_ms || 0) / 1000));
+          return;
+        }
+      }
+
+      if (src === 'radio' && t.stream_url) {
+        playSong(t.stream_url, t.id, src);
+        return;
+      }
+
       let playTarget = t.title || '';
       const cleanArtist = (t.artist || '').split('•')[0].replace(/Video|Song|Track|\d+(\.\d+)?[MK]? views|\d+:\d+/gi, '').trim();
       if (cleanArtist && cleanArtist !== 'Unknown Artist' && cleanArtist !== 'YouTube Music') {
         playTarget += ' ' + cleanArtist;
-      }
-      if (src === 'ytmusic' && t.id) {
-        playYtTrack(t.id, t.title, t.artist, t.artwork_url, t.duration_seconds || 0);
-        return;
-      }
-      if (src === 'radio' && t.stream_url) {
-        playTarget = t.stream_url;
       }
       playSong(playTarget, t.id, src);
     }

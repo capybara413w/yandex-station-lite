@@ -3,8 +3,8 @@ use crate::config::{
 };
 use crate::hardware::{AudioHardware, LedController, NetworkHardware, StationButtonEvent};
 use crate::services::{
-    DeepSeekService, PlaybackState, PlayerService, SoundCloudService, SttService, TtsService,
-    VisualizerService, YtMusicService,
+    DeepSeekService, PlaybackState, PlayerService, SoundCloudService, SttService,
+    TtsService, VisualizerService, YtMusicService,
 };
 use axum::{
     extract::{Path as AxumPath, Query, State},
@@ -546,10 +546,10 @@ async fn play_song_handler(
         );
     }
 
-    state.player.play_soundcloud_or_query(&state.soundcloud, query, &state.led).await;
+    state.player.play_smart_or_query(&state.ytmusic, &state.soundcloud, query, &state.led).await;
     state
         .logs
-        .push("INFO", &format!("Web: SoundCloud запуск трека '{}'", query))
+        .push("INFO", &format!("Web: запуск трека '{}'", query))
         .await;
 
     (
@@ -586,21 +586,96 @@ async fn music_search_handler(
 
     let source = params.source.unwrap_or_else(|| "all".to_string());
     let limit = params.limit.unwrap_or(12);
-    match state.soundcloud.search_multi_source(q, &source, limit).await {
-        Ok(tracks) => Json(serde_json::json!({
-            "success": true,
-            "query": q,
-            "source": source,
-            "results": tracks,
-        }))
-        .into_response(),
-        Err(e) => {
-            warn!("Music search for '{}' (source: {}) failed: {}", q, source, e);
+
+    match source.to_lowercase().as_str() {
+        "ytmusic" | "youtube" | "yt" => {
+            match state.ytmusic.search(q, limit).await {
+                Ok(tracks) => Json(serde_json::json!({
+                    "success": true,
+                    "query": q,
+                    "source": "ytmusic",
+                    "results": tracks,
+                }))
+                .into_response(),
+                Err(e) => {
+                    warn!("YT Music search for '{}' failed: {}", q, e);
+                    Json(serde_json::json!({
+                        "success": false,
+                        "error": e,
+                        "source": "ytmusic",
+                        "results": [],
+                    }))
+                    .into_response()
+                }
+            }
+        }
+        "soundcloud" | "sc" => {
+            match state.soundcloud.search_tracks(q, limit).await {
+                Ok(tracks) => Json(serde_json::json!({
+                    "success": true,
+                    "query": q,
+                    "source": "soundcloud",
+                    "results": tracks,
+                }))
+                .into_response(),
+                Err(e) => {
+                    warn!("SoundCloud search for '{}' failed: {}", q, e);
+                    Json(serde_json::json!({
+                        "success": false,
+                        "error": e,
+                        "source": "soundcloud",
+                        "results": [],
+                    }))
+                    .into_response()
+                }
+            }
+        }
+        "radio" => {
+            match state.soundcloud.search_fallback_streams(q, limit).await {
+                Ok(tracks) => Json(serde_json::json!({
+                    "success": true,
+                    "query": q,
+                    "source": "radio",
+                    "results": tracks,
+                }))
+                .into_response(),
+                Err(e) => {
+                    warn!("Radio search for '{}' failed: {}", q, e);
+                    Json(serde_json::json!({
+                        "success": false,
+                        "error": e,
+                        "source": "radio",
+                        "results": [],
+                    }))
+                    .into_response()
+                }
+            }
+        }
+        _ => {
+            let yt_limit = (limit + 1) / 2;
+            let sc_limit = limit / 2;
+            let yt_tracks = state.ytmusic.search(q, yt_limit).await.unwrap_or_default();
+            let sc_tracks = state.soundcloud.search_tracks(q, sc_limit).await.unwrap_or_default();
+
+            let mut combined = Vec::new();
+            let max_len = std::cmp::max(yt_tracks.len(), sc_tracks.len());
+            for i in 0..max_len {
+                if let Some(yt) = yt_tracks.get(i) {
+                    combined.push(serde_json::to_value(yt).unwrap_or_default());
+                }
+                if let Some(sc) = sc_tracks.get(i) {
+                    combined.push(serde_json::to_value(sc).unwrap_or_default());
+                }
+                if combined.len() >= limit {
+                    break;
+                }
+            }
+
             Json(serde_json::json!({
-                "success": false,
-                "error": e,
-                "source": source,
-                "results": [],
+                "success": true,
+                "query": q,
+                "source": "all",
+                "results": combined,
             }))
             .into_response()
         }
@@ -875,13 +950,33 @@ async fn ytmusic_playlist_tracks_handler(
     }
 }
 
+fn extract_youtube_video_id(input: &str) -> &str {
+    let s = input.trim();
+    if let Some(idx) = s.find("v=") {
+        let rest = &s[idx + 2..];
+        let end = rest.find(['&', '?', '#', '/', ' ']).unwrap_or(rest.len());
+        &rest[..end]
+    } else if let Some(idx) = s.find("youtu.be/") {
+        let rest = &s[idx + 9..];
+        let end = rest.find(['&', '?', '#', '/', ' ']).unwrap_or(rest.len());
+        &rest[..end]
+    } else if let Some(idx) = s.find("/shorts/") {
+        let rest = &s[idx + 8..];
+        let end = rest.find(['&', '?', '#', '/', ' ']).unwrap_or(rest.len());
+        &rest[..end]
+    } else {
+        s
+    }
+}
+
 async fn ytmusic_play_handler(
     State(state): State<AppState>,
     Json(payload): Json<YtPlayRequest>,
 ) -> impl IntoResponse {
     state.tts.stop(&state.led);
 
-    let vid = payload.video_id.trim();
+    let raw_vid = payload.video_id.trim();
+    let vid = extract_youtube_video_id(raw_vid);
     if vid.is_empty() {
         return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
             "success": false,
@@ -889,69 +984,101 @@ async fn ytmusic_play_handler(
         }))).into_response();
     }
 
-    let title = if payload.title.is_empty() { "YouTube Music Track".to_string() } else { payload.title };
-    let artist = if payload.artist.is_empty() { "YouTube Music".to_string() } else { payload.artist };
+    match state.ytmusic.resolve_stream_info(vid).await {
+        Ok(info) => {
+            let title = if !payload.title.is_empty() && payload.title != "YouTube Music Track" {
+                payload.title
+            } else {
+                info.title.unwrap_or_else(|| "YouTube Music Track".to_string())
+            };
 
-    match state.ytmusic.resolve_stream_url(vid).await {
-        Ok(stream_url) => {
-            let dur_secs = payload.duration_seconds.unwrap_or(210);
+            let artist = if !payload.artist.is_empty() && payload.artist != "YouTube Music" {
+                payload.artist
+            } else {
+                info.artist.unwrap_or_else(|| "YouTube Music".to_string())
+            };
+
+            let dur_secs = payload.duration_seconds
+                .or(info.duration_seconds)
+                .unwrap_or(210);
+
+            let artwork = payload.artwork_url.or(info.artwork_url);
+
             state.player.play_direct_stream(
-                &stream_url,
+                &info.stream_url,
                 &title,
                 &artist,
-                payload.artwork_url.clone(),
+                artwork.clone(),
                 dur_secs,
                 false,
                 0,
                 &state.led,
             ).await;
 
-            state.logs.push("INFO", &format!("YouTube Music: запуск '{}' ({})", title, vid)).await;
+            state.logs.push("INFO", &format!("YouTube Music: запуск '{}' - '{}' ({})", title, artist, vid)).await;
 
             (StatusCode::OK, Json(serde_json::json!({
                 "success": true,
                 "title": title,
                 "artist": artist,
-                "stream_url": stream_url,
+                "duration_seconds": dur_secs,
+                "artwork_url": artwork,
+                "stream_url": info.stream_url,
             }))).into_response()
         }
         Err(e) => {
-            warn!("YouTube Music direct resolve error for {}: {}. Attempting audio stream fallback...", vid, e);
-            match state.soundcloud.resolve_best_match(&title, &artist, payload.duration_seconds).await {
-                Ok(resolved) => {
-                    let dur_secs = if resolved.duration_ms > 0 {
-                        resolved.duration_ms / 1000
-                    } else {
-                        payload.duration_seconds.unwrap_or(210)
-                    };
-                    state.player.play_direct_stream(
-                        &resolved.stream_url,
-                        &title,
-                        &artist,
-                        payload.artwork_url.clone().or(resolved.artwork_url),
-                        dur_secs,
-                        resolved.is_hls,
-                        0,
-                        &state.led,
-                    ).await;
+            let title = if payload.title.is_empty() { "YouTube Music Track".to_string() } else { payload.title };
+            let artist = if payload.artist.is_empty() { "YouTube Music".to_string() } else { payload.artist };
 
-                    state.logs.push("INFO", &format!("YouTube Music: запуск '{}' ({})", title, vid)).await;
-                    (StatusCode::OK, Json(serde_json::json!({
-                        "success": true,
-                        "title": title,
-                        "artist": artist,
-                        "stream_url": resolved.stream_url,
-                        "fallback": true,
-                    }))).into_response()
+            warn!("YouTube Music direct resolve error for {}: {}. Searching alternative YouTube Music match...", vid, e);
+            // Search YouTube Music for alternative video ID of the same track
+            let mut alt_stream = None;
+            let query = format!("{} {}", title, artist);
+            if let Ok(results) = state.ytmusic.search(&query, 3).await {
+                for alt_track in results {
+                    if alt_track.id != vid {
+                        if let Ok(alt_info) = state.ytmusic.resolve_stream_info(&alt_track.id).await {
+                            alt_stream = Some((alt_info, alt_track.id));
+                            break;
+                        }
+                    }
                 }
-                Err(sc_err) => {
-                    error!("YouTube Music resolve error for {}: {} (fallback: {})", vid, e, sc_err);
-                    state.logs.push("ERROR", &format!("YouTube Music error for {}: {}", vid, e)).await;
-                    (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                        "success": false,
-                        "error": format!("YT Music error: {}. Fallback error: {}", e, sc_err),
-                    }))).into_response()
-                }
+            }
+
+            if let Some((alt_info, alt_vid)) = alt_stream {
+                let dur_secs = payload.duration_seconds
+                    .or(alt_info.duration_seconds)
+                    .unwrap_or(210);
+
+                let artwork = payload.artwork_url.or(alt_info.artwork_url);
+
+                state.player.play_direct_stream(
+                    &alt_info.stream_url,
+                    &title,
+                    &artist,
+                    artwork.clone(),
+                    dur_secs,
+                    false,
+                    0,
+                    &state.led,
+                ).await;
+
+                state.logs.push("INFO", &format!("YouTube Music: запуск альтернативного YouTube-потока '{}' ({})", title, alt_vid)).await;
+
+                (StatusCode::OK, Json(serde_json::json!({
+                    "success": true,
+                    "title": title,
+                    "artist": artist,
+                    "stream_url": alt_info.stream_url,
+                    "fallback": false,
+                }))).into_response()
+            } else {
+                error!("YouTube Music resolve error for {}: {}", vid, e);
+                state.logs.push("ERROR", &format!("YouTube Music: не удалось получить поток для '{}': {}", title, e)).await;
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                    "success": false,
+                    "error": format!("Не удалось получить поток YouTube для выбранного трека '{}': {}", title, e),
+                }))).into_response()
             }
         }
     }
@@ -1234,11 +1361,12 @@ async fn handle_prompt(
                     } else {
                         resp.song.clone()
                     };
+                    let yt = state.ytmusic.clone();
                     let sc = state.soundcloud.clone();
                     let pl = state.player.clone();
                     let l = state.led.clone();
                     tokio::spawn(async move {
-                        pl.play_soundcloud_or_query(&sc, &song_name, &l).await;
+                        pl.play_smart_or_query(&yt, &sc, &song_name, &l).await;
                     });
                 }
                 "stop" => state.player.stop(&state.led).await,
@@ -2849,3 +2977,4 @@ async fn terminal_run_handler(
         })),
     }
 }
+
