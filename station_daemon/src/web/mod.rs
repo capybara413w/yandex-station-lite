@@ -197,6 +197,11 @@ pub fn create_router(state: AppState) -> Router {
         // Terminal command execution
         .route("/api/terminal/run", post(terminal_run_handler))
         .route("/api/command", post(terminal_run_handler))
+        // Dual Boot & System Switch
+        .route("/api/dualboot/status", get(get_dualboot_status_handler))
+        .route("/api/dualboot/choose", post(post_dualboot_choose_handler))
+        .route("/api/dualboot/switch_quasar", post(post_switch_quasar_handler))
+        .route("/api/dualboot/mode", post(post_dualboot_mode_handler))
         // Static assets fallback if /data/station_web exists
         .nest_service("/static", ServeDir::new(static_dir))
         .layer(CorsLayer::permissive())
@@ -2975,6 +2980,123 @@ async fn terminal_run_handler(
             "stderr": e.to_string(),
             "output": format!("Execution error: {}", e),
         })),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dual Boot & System Switching Handlers
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct DualBootStatusResponse {
+    active: bool,
+    remaining_seconds: u32,
+    timeout_seconds: u32,
+    current_os: &'static str,
+    default_mode: String,
+}
+
+async fn get_dualboot_status_handler() -> impl IntoResponse {
+    let active = Path::new("/tmp/dualboot_active").exists();
+    let remaining_seconds = if active {
+        std::fs::read_to_string("/tmp/dualboot_remaining")
+            .ok()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let default_mode = std::fs::read_to_string("/data/dualboot_mode")
+        .unwrap_or_else(|_| "choice".to_string())
+        .trim()
+        .to_string();
+
+    Json(DualBootStatusResponse {
+        active,
+        remaining_seconds,
+        timeout_seconds: 7,
+        current_os: "station_daemon",
+        default_mode,
+    })
+}
+
+#[derive(Deserialize)]
+struct DualBootChooseRequest {
+    choice: String,
+}
+
+async fn post_dualboot_choose_handler(
+    Json(payload): Json<DualBootChooseRequest>,
+) -> impl IntoResponse {
+    match payload.choice.as_str() {
+        "daemon" => {
+            let _ = std::fs::write("/tmp/dualboot_stay_daemon", "1");
+            let _ = std::fs::remove_file("/tmp/dualboot_active");
+            Json(serde_json::json!({
+                "success": true,
+                "message": "Выбран Station Daemon. Автопереключение на Квазар отменено."
+            }))
+        }
+        "quasar" => {
+            let _ = std::fs::write("/tmp/dualboot_switch_quasar", "1");
+            tokio::spawn(async {
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                let _ = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg("/data/dualboot.sh --quasar")
+                    .spawn();
+            });
+            Json(serde_json::json!({
+                "success": true,
+                "message": "Переключение на Яндекс Квазар (Алиса)..."
+            }))
+        }
+        _ => Json(serde_json::json!({
+            "success": false,
+            "error": "Неверный выбор (ожидается 'daemon' или 'quasar')"
+        })),
+    }
+}
+
+async fn post_switch_quasar_handler() -> impl IntoResponse {
+    tokio::spawn(async {
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        let _ = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("/data/dualboot.sh --quasar")
+            .spawn();
+    });
+    Json(serde_json::json!({
+        "success": true,
+        "message": "Остановка Station Daemon и запуск Яндекс Квазара (Алиса)..."
+    }))
+}
+
+#[derive(Deserialize)]
+struct DualBootModePayload {
+    mode: String,
+}
+
+async fn post_dualboot_mode_handler(
+    Json(payload): Json<DualBootModePayload>,
+) -> impl IntoResponse {
+    let mode = payload.mode.trim();
+    if mode == "choice" || mode == "daemon" || mode == "quasar" {
+        if let Err(e) = std::fs::write("/data/dualboot_mode", mode) {
+            return Json(serde_json::json!({
+                "success": false,
+                "error": format!("Не удалось сохранить режим: {}", e)
+            }));
+        }
+        Json(serde_json::json!({
+            "success": true,
+            "mode": mode
+        }))
+    } else {
+        Json(serde_json::json!({
+            "success": false,
+            "error": "Режим должен быть 'choice', 'daemon' или 'quasar'"
+        }))
     }
 }
 

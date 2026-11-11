@@ -865,6 +865,27 @@
         </button>
       </header>
 
+      <!-- DUAL BOOT LIVE COUNTDOWN BANNER -->
+      <div id="dualBootBanner" style="display: none; background: linear-gradient(90deg, rgba(255,180,194,0.15), rgba(120,0,255,0.25)); border: 1px solid rgba(255,180,194,0.3); border-radius: 16px; padding: 14px 20px; margin-bottom: 20px; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 28px;">timer</span>
+          <div>
+            <div style="font-weight: 800; font-size: 0.95rem; color: #fff;">Окно выбора Dual Boot: автовыбор Квазара через <span id="dualBootSecs" style="color: #ffb4c2; font-size: 1.1rem; font-weight: 800;">7</span> сек</div>
+            <div style="font-size: 0.78rem; color: #c7c2c9;">Нажмите кнопку на колонке, останьтесь в Station Daemon или переключитесь на Алису</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button type="button" class="m3-btn m3-btn-primary" onclick="chooseDualBoot('daemon')">
+            <span class="material-symbols-rounded">check</span>
+            <span>Остаться в Station Daemon</span>
+          </button>
+          <button type="button" class="m3-btn m3-btn-outlined" style="border-color: #b388ff; color: #d1c4e9;" onclick="chooseDualBoot('quasar')">
+            <span class="material-symbols-rounded">smart_toy</span>
+            <span>Запустить Квазар (Алиса)</span>
+          </button>
+        </div>
+      </div>
+
       <!-- TAB 1: HOME -->
       <section id="tab-home" class="tab-content active">
         <div class="m3-home-grid">
@@ -1486,6 +1507,49 @@
       <section id="tab-settings" class="tab-content">
         <div style="display: flex; flex-direction: column; gap: 24px;">
 
+          <!-- Dual Boot & OS Switching Card -->
+          <div class="m3-surface-card" style="position: relative; overflow: visible;">
+            <div class="m3-card-peeker-container" title="Пухляш выбирает систему :3">
+              <img class="m3-card-peeker" data-mascot="1" alt="DualBoot Boykisser" />
+            </div>
+            <div class="m3-card-header">
+              <div class="m3-card-title" style="display: flex; align-items: center; gap: 8px;">
+                <span class="material-symbols-rounded" style="color: #b388ff;">alt_route</span>
+                <span>Мультизагрузка (Dual Boot) и переключение систем</span>
+                <span style="font-size: 0.72rem; font-weight: 700; background: #372844; color: #d1c4e9; padding: 2px 8px; border-radius: 8px;">v1.2</span>
+              </div>
+            </div>
+
+            <div style="font-size: 0.85rem; color: #a49ea8; line-height: 1.5; margin-bottom: 16px;">
+              Позволяет выбирать между автономным <b style="color: #ffb4c2;">Station Daemon</b> и заводским <b style="color: #b388ff;">Яндекс Квазаром (Алиса)</b> при старте станции или переключаться в один клик.
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-bottom: 8px;">
+              <div style="background: #17151a; border-radius: 14px; padding: 16px;">
+                <label class="m3-label" style="margin-bottom: 8px; display: block;">Режим загрузки по умолчанию:</label>
+                <select class="m3-select" id="dualBootModeSelect" style="width: 100%;" onchange="saveDualBootMode(this.value)">
+                  <option value="choice">⚡ Выбор при старте (авто-Квазар через 7 сек)</option>
+                  <option value="daemon">⭐ Всегда Station Daemon (пропуск выбора)</option>
+                  <option value="quasar">🟣 Всегда Яндекс Квазар (Алиса)</option>
+                </select>
+                <div style="font-size: 0.72rem; color: #8e8893; margin-top: 6px;">
+                  При выборе "Всегда Station Daemon" колонка стартует без 7-сек задержки.
+                </div>
+              </div>
+
+              <div style="background: #17151a; border-radius: 14px; padding: 16px; display: flex; flex-direction: column; justify-content: space-between;">
+                <div>
+                  <div style="font-size: 0.82rem; font-weight: 700; color: #fff; margin-bottom: 4px;">Быстрое переключение на Квазар:</div>
+                  <div style="font-size: 0.72rem; color: #8e8893;">Остановит Station Daemon и запустит maind / quasar_launcher2.</div>
+                </div>
+                <button type="button" class="m3-btn m3-btn-tonal" style="background: #372844; color: #d1c4e9; margin-top: 10px;" onclick="switchQuasarNow()">
+                  <span class="material-symbols-rounded">swap_horiz</span>
+                  <span>Переключиться на Алису прямо сейчас</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
           <!-- Wi-Fi Management -->
           <div class="m3-surface-card" style="position: relative; overflow: visible;">
             <div class="m3-card-peeker-container" title="Пухляш настраивает Wi-Fi :3">
@@ -2003,6 +2067,60 @@
     let socks5Active = false;
     let visActive = true;
 
+    
+    async function checkDualBoot() {
+      try {
+        const res = await fetch('/api/dualboot/status');
+        if (!res.ok) return;
+        const d = await res.json();
+        const banner = document.getElementById('dualBootBanner');
+        const secs = document.getElementById('dualBootSecs');
+        const modeSelect = document.getElementById('dualBootModeSelect');
+        if (modeSelect && d.default_mode) {
+          modeSelect.value = d.default_mode;
+        }
+        if (d.active && d.remaining_seconds > 0) {
+          if (banner) banner.style.display = 'flex';
+          if (secs) secs.innerText = d.remaining_seconds;
+        } else {
+          if (banner) banner.style.display = 'none';
+        }
+      } catch (e) {}
+    }
+
+    async function chooseDualBoot(choice) {
+      try {
+        const res = await fetch('/api/dualboot/choose', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ choice })
+        });
+        const d = await res.json();
+        const banner = document.getElementById('dualBootBanner');
+        if (banner) banner.style.display = 'none';
+      } catch (e) {}
+    }
+
+    async function switchQuasarNow() {
+      if (!confirm('Переключиться на Яндекс Квазар (Алису)? Station Daemon будет остановлен.')) return;
+      try {
+        await fetch('/api/dualboot/switch_quasar', { method: 'POST' });
+        alert('Запуск Квазара... Станция переключается на Алису.');
+      } catch (e) {
+        alert('Ошибка: ' + e.message);
+      }
+    }
+
+    async function saveDualBootMode(mode) {
+      try {
+        await fetch('/api/dualboot/mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode })
+        });
+      } catch (e) {}
+    }
+
     function switchTab(tab) {
       updateWatermarks(tab);
       currentTab = tab;
@@ -2160,6 +2278,7 @@
           body: JSON.stringify({ action })
         });
         fetchStatus();
+    checkDualBoot();
     fetchYtStatus();
       } catch (e) {
         console.error(e);

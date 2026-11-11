@@ -32,6 +32,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("=== Starting Yandex Station Lite Autonomous Daemon (aarch64) ===");
 
+    // Check CLI arguments for Dual Boot controls
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--quasar") {
+        info!("CLI flag --quasar detected: launching Yandex Quasar...");
+        let _ = std::process::Command::new("/data/dualboot.sh")
+            .arg("--quasar")
+            .status();
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "--skip-choice" || a == "--daemon") {
+        info!("CLI flag --skip-choice: skipping dualboot countdown window, staying in Station Daemon.");
+        let _ = std::fs::write("/tmp/dualboot_stay_daemon", "1");
+        let _ = std::fs::remove_file("/tmp/dualboot_active");
+    }
+
     // 2. Load configuration
     let config_path = if Path::new("/data/config.json").exists() {
         "/data/config.json"
@@ -102,6 +117,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tokio::spawn(async move {
         while let Some(event) = btn_rx.recv().await {
+            // Signal dualboot supervisor that a physical hardware button was pressed!
+            if Path::new("/tmp/dualboot_active").exists() {
+                let _ = std::fs::write("/tmp/dualboot_stay_daemon", "1");
+                let _ = std::fs::remove_file("/tmp/dualboot_active");
+                info!("DualBoot: hardware button event detected ({:?}) -> cancelled auto-switch, staying in Station Daemon!", event);
+            }
+
             match event {
                 // Volume Up (+)
                 StationButtonEvent::VolumeUp => {
