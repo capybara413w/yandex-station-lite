@@ -8,7 +8,7 @@ use hardware::{
     AudioHardware, ButtonsListener, LedController, NetworkHardware, StationButtonEvent,
 };
 use services::{
-    DeepSeekService, PlayerService, ProxyBridge, SoundCloudService, SttService,
+    ChatService, DeepSeekService, PlayerService, ProxyBridge, SoundCloudService, SttService,
     TtsService, VisualizerService, YtMusicService,
 };
 use std::net::SocketAddr;
@@ -102,6 +102,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let visualizer = Arc::new(VisualizerService::new(&initial_config.hardware.led_sysfs_base));
     visualizer.clone().start(tts.clone());
 
+    let chat_storage_path = if Path::new("/data").exists() {
+        "/data/chat_history.json"
+    } else {
+        "chat_history.json"
+    };
+    let chat = Arc::new(ChatService::new(chat_storage_path));
+
     // 5. Button Event Processing Loop — station/buttons_daemon.sh
     let (btn_tx, mut btn_rx) = mpsc::channel::<StationButtonEvent>(32);
     buttons.start(btn_tx.clone());
@@ -114,6 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stt_clone = stt.clone();
     let deepseek_clone = deepseek.clone();
     let tts_clone = tts.clone();
+    let chat_clone = chat.clone();
 
     tokio::spawn(async move {
         while let Some(event) = btn_rx.recv().await {
@@ -169,6 +177,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let sc_ref = soundcloud_clone.clone();
                     let yt_ref = ytmusic_clone.clone();
                     let tts_ref = tts_clone.clone();
+                    let chat_ref = chat_clone.clone();
 
                     tokio::spawn(async move {
                         // 1. Record & transcribe speech
@@ -176,17 +185,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             Ok(recognized_text) => {
                                 info!("Voice command recognized: '{}'", recognized_text);
 
-                                // 2. Send query to DeepSeek
-                                match ds_ref.query(&recognized_text).await {
+                                // 2. Multi-turn session & 1-hour rule context
+                                let (session_id, history, _) = chat_ref.prepare_session_for_prompt(None).await;
+
+                                // 3. Send query to DeepSeek with history
+                                match ds_ref.query_with_history(&recognized_text, &history).await {
                                     Ok(resp) => {
                                         info!("DeepSeek reply: '{}' (action: {})", resp.text, resp.action);
 
-                                        // 3. Native Speech Synthesis (TTS) & Breathing Animation
+                                        chat_ref.record_turn(
+                                            &session_id,
+                                            &recognized_text,
+                                            &resp.text,
+                                            &resp.action,
+                                            resp.color,
+                                            &resp.song,
+                                        ).await;
+
+                                        // 4. Native Speech Synthesis (TTS) & Breathing Animation
                                         if !resp.text.is_empty() {
                                             let _ = tts_ref.speak(&resp.text, resp.color, &led_ref).await;
                                         }
 
-                                        // 4. Handle Music Actions via YouTube Music (100% exact match)
+                                        // 5. Handle Music Actions via YouTube Music (100% exact match)
                                         match resp.action.as_str() {
                                             "play" => {
                                                 let song = if resp.song.is_empty() {
@@ -234,6 +255,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         btn_tx: btn_tx.clone(),
         logs: logs.clone(),
         start_time: std::time::Instant::now(),
+        chat: chat.clone(),
     };
 
     let router = web::create_router(app_state);

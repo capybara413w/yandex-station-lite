@@ -3,8 +3,8 @@ use crate::config::{
 };
 use crate::hardware::{AudioHardware, LedController, NetworkHardware, StationButtonEvent};
 use crate::services::{
-    DeepSeekService, PlaybackState, PlayerService, SoundCloudService, SttService,
-    TtsService, VisualizerService, YtMusicService,
+    ChatService, ChatSession, ChatSessionSummary, DeepSeekService, PlaybackState, PlayerService,
+    SoundCloudService, SttService, TtsService, VisualizerService, YtMusicService,
 };
 use axum::{
     extract::{Path as AxumPath, Query, State},
@@ -95,6 +95,7 @@ pub struct AppState {
     pub btn_tx: mpsc::Sender<StationButtonEvent>,
     pub logs: Arc<LogBuffer>,
     pub start_time: Instant,
+    pub chat: Arc<ChatService>,
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -149,6 +150,16 @@ pub fn create_router(state: AppState) -> Router {
         // Ask / LLM query endpoints
         .route("/api/ask", post(post_ask_handler))
         .route("/ask", get(get_ask_handler))
+        // Chat History & Sessions
+        .route(
+            "/api/chats",
+            get(get_chats_handler).delete(delete_all_chats_handler),
+        )
+        .route("/api/chats/new", post(post_new_chat_handler))
+        .route(
+            "/api/chats/:id",
+            get(get_chat_by_id_handler).delete(delete_chat_by_id_handler),
+        )
         // Config management
         .route("/api/config", get(get_config_handler).post(post_config_handler))
         .route(
@@ -1293,31 +1304,36 @@ struct AskRequest {
     prompt: String,
     #[serde(default)]
     speak: Option<bool>,
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 async fn post_ask_handler(
     State(state): State<AppState>,
     Json(payload): Json<AskRequest>,
 ) -> impl IntoResponse {
-    handle_prompt(&state, &payload.prompt, payload.speak.unwrap_or(true)).await
+    handle_prompt(&state, &payload.prompt, payload.speak.unwrap_or(true), payload.session_id).await
 }
 
 #[derive(Deserialize)]
 struct AskQuery {
     q: String,
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 async fn get_ask_handler(
     State(state): State<AppState>,
     Query(query): Query<AskQuery>,
 ) -> impl IntoResponse {
-    handle_prompt(&state, &query.q, true).await
+    handle_prompt(&state, &query.q, true, query.session_id).await
 }
 
 async fn handle_prompt(
     state: &AppState,
     prompt_text: &str,
     speak: bool,
+    session_id_req: Option<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let prompt = prompt_text.trim();
     if prompt.is_empty() {
@@ -1332,7 +1348,13 @@ async fn handle_prompt(
         .push("INFO", &format!("Web DeepSeek запрос: '{}'", prompt))
         .await;
 
-    match state.deepseek.query(prompt).await {
+    // 1-hour session rule & context resolution:
+    let (session_id, history, is_new) = state
+        .chat
+        .prepare_session_for_prompt(session_id_req.as_deref())
+        .await;
+
+    match state.deepseek.query_with_history(prompt, &history).await {
         Ok(resp) => {
             state.led.set_rgb(resp.color[0], resp.color[1], resp.color[2]);
 
@@ -1341,9 +1363,22 @@ async fn handle_prompt(
                 .push(
                     "INFO",
                     &format!(
-                        "DeepSeek ответ: '{}' (действие: {})",
-                        resp.text, resp.action
+                        "DeepSeek ответ [чат {}]: '{}' (действие: {})",
+                        session_id, resp.text, resp.action
                     ),
+                )
+                .await;
+
+            // Record turn in persistent chat history
+            state
+                .chat
+                .record_turn(
+                    &session_id,
+                    prompt,
+                    &resp.text,
+                    &resp.action,
+                    resp.color,
+                    &resp.song,
                 )
                 .await;
 
@@ -1379,7 +1414,13 @@ async fn handle_prompt(
                 _ => {}
             }
 
-            (StatusCode::OK, Json(serde_json::to_value(resp).unwrap()))
+            let mut val = serde_json::to_value(&resp).unwrap();
+            if let Some(obj) = val.as_object_mut() {
+                obj.insert("session_id".to_string(), serde_json::json!(session_id));
+                obj.insert("is_new_session".to_string(), serde_json::json!(is_new));
+            }
+
+            (StatusCode::OK, Json(val))
         }
         Err(e) => {
             state
@@ -1392,7 +1433,8 @@ async fn handle_prompt(
                     "text": "Ошибка при обработке запроса к нейросети.",
                     "color": [255, 50, 0],
                     "action": "none",
-                    "error": e
+                    "error": e,
+                    "session_id": session_id
                 })),
             )
         }
@@ -3099,4 +3141,70 @@ async fn post_dualboot_mode_handler(
         }))
     }
 }
+
+// ---------------------------------------------------------------------------
+// Chat History & Multi-turn Session Handlers
+// ---------------------------------------------------------------------------
+
+async fn get_chats_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let list = state.chat.list_sessions().await;
+    Json(serde_json::json!({
+        "success": true,
+        "chats": list
+    }))
+}
+
+async fn get_chat_by_id_handler(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> impl IntoResponse {
+    if let Some(chat) = state.chat.get_session(&id).await {
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({ "success": true, "chat": chat })),
+        )
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "success": false, "error": "Чат не найден" })),
+        )
+    }
+}
+
+#[derive(Deserialize)]
+struct CreateChatRequest {
+    title: Option<String>,
+}
+
+async fn post_new_chat_handler(
+    State(state): State<AppState>,
+    payload: Option<Json<CreateChatRequest>>,
+) -> impl IntoResponse {
+    let title = payload.and_then(|p| p.0.title);
+    let session = state.chat.create_session(title.as_deref()).await;
+    Json(serde_json::json!({
+        "success": true,
+        "chat": session
+    }))
+}
+
+async fn delete_chat_by_id_handler(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> impl IntoResponse {
+    let deleted = state.chat.delete_session(&id).await;
+    Json(serde_json::json!({
+        "success": deleted,
+        "id": id
+    }))
+}
+
+async fn delete_all_chats_handler(State(state): State<AppState>) -> impl IntoResponse {
+    state.chat.clear_all_sessions().await;
+    Json(serde_json::json!({
+        "success": true,
+        "message": "Все чаты успешно удалены"
+    }))
+}
+
 

@@ -1,3 +1,4 @@
+pub mod chat;
 pub mod clients;
 pub mod deepseek;
 pub mod player;
@@ -8,6 +9,7 @@ pub mod tts;
 pub mod visualizer;
 pub mod ytmusic;
 
+pub use chat::{ChatMessageItem, ChatService, ChatSession, ChatSessionSummary};
 pub use clients::{
     CloudflareLlmClient, CloudflareSttClient, CloudflareTtsClient, GoogleTtsClient, LlmClient,
     LocalLlmClient, LocalSttClient, LocalTtsClient, OpenRouterLlmClient, OpenRouterSttClient,

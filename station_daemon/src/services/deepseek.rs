@@ -1,4 +1,5 @@
 use crate::config::{merge_extra_payload, AppConfig, ProxyConfig};
+use crate::services::chat::ChatMessageItem;
 use crate::services::clients::{
     BoxFuture, CloudflareLlmClient, LlmClient, LocalLlmClient, OpenRouterLlmClient,
 };
@@ -44,6 +45,15 @@ impl DeepSeekService {
 
     /// Queries active LLM provider (OpenRouter, Cloudflare, Groq, OpenAI, Mistral, Anthropic, Gemini, DeepSeek, or Custom) chat completions API.
     pub async fn query(&self, prompt: &str) -> Result<DeepSeekResponse, String> {
+        self.query_with_history(prompt, &[]).await
+    }
+
+    /// Queries active LLM provider including full multi-turn conversation context.
+    pub async fn query_with_history(
+        &self,
+        prompt: &str,
+        history: &[ChatMessageItem],
+    ) -> Result<DeepSeekResponse, String> {
         let (
             provider,
             api_key,
@@ -206,7 +216,7 @@ impl DeepSeekService {
                 max_tokens,
                 extra_payload,
             );
-            return client.query(prompt, &system_prompt).await;
+            return client.query_with_history(prompt, &system_prompt, history).await;
         }
 
         if provider == "cloudflare" {
@@ -227,7 +237,7 @@ impl DeepSeekService {
                 model_name,
                 extra_payload,
             );
-            return client.query(prompt, &system_prompt).await;
+            return client.query_with_history(prompt, &system_prompt, history).await;
         }
 
         if provider == "custom" || provider == "local" {
@@ -240,7 +250,7 @@ impl DeepSeekService {
                 max_tokens,
                 extra_payload,
             );
-            return client.query(prompt, &system_prompt).await;
+            return client.query_with_history(prompt, &system_prompt, history).await;
         }
 
         if api_key.is_empty() {
@@ -273,23 +283,57 @@ impl DeepSeekService {
             )
         };
 
+        let start_idx = if history.len() > 14 { history.len() - 14 } else { 0 };
+
         let mut body = if provider == "anthropic" {
+            let mut messages = Vec::new();
+            for item in &history[start_idx..] {
+                if item.role == "user" {
+                    messages.push(serde_json::json!({ "role": "user", "content": item.text }));
+                } else if item.role == "assistant" {
+                    let content = serde_json::json!({
+                        "text": item.text,
+                        "color": item.color.unwrap_or([0, 200, 255]),
+                        "action": item.action.as_deref().unwrap_or("none"),
+                        "song": item.song.as_deref().unwrap_or("")
+                    }).to_string();
+                    messages.push(serde_json::json!({ "role": "assistant", "content": content }));
+                }
+            }
+            messages.push(serde_json::json!({ "role": "user", "content": prompt }));
+
             serde_json::json!({
                 "model": model,
                 "system": &effective_system_prompt,
-                "messages": [
-                    { "role": "user", "content": prompt }
-                ],
+                "messages": messages,
                 "temperature": temperature,
                 "max_tokens": max_tokens
             })
         } else {
+            let mut messages = Vec::new();
+            messages.push(serde_json::json!({
+                "role": "system",
+                "content": &effective_system_prompt
+            }));
+
+            for item in &history[start_idx..] {
+                if item.role == "user" {
+                    messages.push(serde_json::json!({ "role": "user", "content": item.text }));
+                } else if item.role == "assistant" {
+                    let content = serde_json::json!({
+                        "text": item.text,
+                        "color": item.color.unwrap_or([0, 200, 255]),
+                        "action": item.action.as_deref().unwrap_or("none"),
+                        "song": item.song.as_deref().unwrap_or("")
+                    }).to_string();
+                    messages.push(serde_json::json!({ "role": "assistant", "content": content }));
+                }
+            }
+            messages.push(serde_json::json!({ "role": "user", "content": prompt }));
+
             let mut b = serde_json::json!({
                 "model": model,
-                "messages": [
-                    { "role": "system", "content": &effective_system_prompt },
-                    { "role": "user", "content": prompt }
-                ],
+                "messages": messages,
                 "temperature": temperature,
                 "max_tokens": max_tokens
             });
@@ -473,6 +517,15 @@ impl LlmClient for DeepSeekService {
         _system_prompt: &'a str,
     ) -> BoxFuture<'a, Result<DeepSeekResponse, String>> {
         Box::pin(async move { self.query(prompt).await })
+    }
+
+    fn query_with_history<'a>(
+        &'a self,
+        prompt: &'a str,
+        _system_prompt: &'a str,
+        history: &'a [ChatMessageItem],
+    ) -> BoxFuture<'a, Result<DeepSeekResponse, String>> {
+        Box::pin(async move { self.query_with_history(prompt, history).await })
     }
 }
 

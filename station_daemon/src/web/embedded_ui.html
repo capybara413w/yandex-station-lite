@@ -771,7 +771,142 @@
     .tab-content.active {
       display: block;
     }
-  </style>
+  
+    /* Chat Workspace Layout */
+    .m3-chat-workspace {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 16px;
+      min-height: 480px;
+    }
+    @media (max-width: 820px) {
+      .m3-chat-workspace {
+        grid-template-columns: 1fr;
+      }
+    }
+    .m3-chat-sidebar {
+      background: #17151a;
+      border-radius: 18px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      max-height: 540px;
+    }
+    .m3-chat-sessions-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      overflow-y: auto;
+      flex: 1;
+      padding-right: 4px;
+    }
+    .m3-chat-session-item {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.03);
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      transition: background 0.15s ease, border-color 0.15s ease;
+      border: 1px solid transparent;
+    }
+    .m3-chat-session-item:hover {
+      background: rgba(255, 180, 194, 0.08);
+      border-color: rgba(255, 180, 194, 0.2);
+    }
+    .m3-chat-session-item.active {
+      background: rgba(255, 180, 194, 0.15);
+      border-color: #ffb4c2;
+    }
+    .m3-chat-main {
+      background: #17151a;
+      border-radius: 18px;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      overflow: hidden;
+      max-height: 540px;
+    }
+    .m3-chat-main-header {
+      padding: 12px 18px;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+    .m3-chat-badge {
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      display: inline-block;
+    }
+    .m3-chat-badge.active {
+      background: rgba(76, 175, 80, 0.18);
+      color: #81c784;
+      border: 1px solid rgba(76, 175, 80, 0.3);
+    }
+    .m3-chat-badge.inactive {
+      background: rgba(255, 255, 255, 0.08);
+      color: #8e8893;
+    }
+    .m3-chat-messages-container {
+      flex: 1;
+      padding: 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .m3-msg-row {
+      display: flex;
+      gap: 10px;
+      max-width: 85%;
+    }
+    .m3-msg-row.user {
+      align-self: flex-end;
+      flex-direction: row-reverse;
+    }
+    .m3-msg-row.assistant {
+      align-self: flex-start;
+    }
+    .m3-msg-bubble {
+      padding: 10px 14px;
+      border-radius: 18px;
+      font-size: 0.88rem;
+      line-height: 1.45;
+      word-break: break-word;
+      position: relative;
+    }
+    .m3-msg-row.user .m3-msg-bubble {
+      background: linear-gradient(135deg, #7800ff, #a259ff);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .m3-msg-row.assistant .m3-msg-bubble {
+      background: #232027;
+      color: #f5edf2;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-bottom-left-radius: 4px;
+    }
+    .m3-msg-time {
+      font-size: 0.68rem;
+      color: rgba(255, 255, 255, 0.5);
+      margin-top: 4px;
+      text-align: right;
+    }
+    .m3-chat-input-bar {
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.02);
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+</style>
 </head>
 <body>
   <!-- Flat Material 3 Background Shapes (strictly behind all UI content with z-index: 0) -->
@@ -1323,17 +1458,89 @@
             <textarea id="sysPrompt" rows="6" class="m3-textarea"></textarea>
           </div>
 
-          <!-- Dialogue History -->
-          <div class="m3-surface-card">
-            <div class="m3-card-header">
-              <div class="m3-card-title" style="display: flex; align-items: center; gap: 8px;">
-                <span class="material-symbols-rounded" style="color: #ffb4c2;">history</span>
-                <span>История диалогов Станции</span>
-                <img class="m3-boykisser-sticker" data-mascot="1" style="width: 24px; height: 24px;" alt=":3" title="Диалоги :3" />
-              </div>
-              <button type="button" class="m3-btn m3-btn-tonal" onclick="fetchLogs()">Обновить логи</button>
+          <!-- Chat History & Multi-turn Assistant Workspace -->
+          <div class="m3-surface-card" style="padding: 20px; position: relative; overflow: visible;">
+            <div class="m3-card-peeker-container" title="Бойкисер болтает с нейросетью :3">
+              <img class="m3-card-peeker" data-mascot="1" alt="Chat Boykisser" />
             </div>
-            <div id="dialogueLogsList" style="display: flex; flex-direction: column; gap: 10px; max-height: 380px; overflow-y: auto;"></div>
+            <div class="m3-card-header" style="margin-bottom: 16px;">
+              <div>
+                <div class="m3-card-title" style="display: flex; align-items: center; gap: 8px;">
+                  <span class="material-symbols-rounded" style="color: #ffb4c2;">forum</span>
+                  <span>История всех чатов и диалог</span>
+                  <span style="font-size: 0.72rem; font-weight: 700; background: #372844; color: #ffb4c2; padding: 2px 8px; border-radius: 8px;">Контекст 1 час</span>
+                </div>
+                <div style="font-size: 0.78rem; color: #a49ea8; margin-top: 4px;">
+                  При паузе более 1 часа автоматически открывается новый чат с чистым контекстом. Удаленные чаты не учитываются.
+                </div>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <button type="button" class="m3-btn m3-btn-tonal" onclick="loadChatsList()" title="Обновить историю">
+                  <span class="material-symbols-rounded">refresh</span>
+                </button>
+                <button type="button" class="m3-btn m3-btn-primary" onclick="createNewChatSession()">
+                  <span class="material-symbols-rounded">add_comment</span>
+                  <span>Новый чат</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="m3-chat-workspace">
+              <!-- Left Sidebar: Sessions List -->
+              <div class="m3-chat-sidebar">
+                <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 8px;">
+                  <span style="font-size: 0.74rem; font-weight: 700; color: #8e8893; text-transform: uppercase;">Все чаты (<span id="chatSessionsCount">0</span>)</span>
+                  <button type="button" style="background: none; border: none; color: #ffb4c2; font-size: 0.74rem; cursor: pointer; text-decoration: underline;" onclick="clearAllChatSessions()">Очистить все</button>
+                </div>
+                <div id="chatSessionsList" class="m3-chat-sessions-list">
+                  <div style="text-align: center; color: #8e8893; padding: 20px; font-size: 0.85rem;">Загрузка списка чатов...</div>
+                </div>
+              </div>
+
+              <!-- Right Area: Chat History & Input -->
+              <div class="m3-chat-main">
+                <!-- Chat Header -->
+                <div class="m3-chat-main-header">
+                  <div style="display: flex; align-items: center; gap: 10px; overflow: hidden; flex: 1;">
+                    <div style="overflow: hidden;">
+                      <div id="activeChatTitle" style="font-weight: 800; font-size: 0.95rem; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        Выберите чат или начните новый
+                      </div>
+                      <div id="activeChatMeta" style="font-size: 0.72rem; color: #8e8893; display: flex; align-items: center; gap: 8px; margin-top: 2px;">
+                        <span id="activeChatStatusBadge" class="m3-chat-badge inactive">Ожидание</span>
+                        <span id="activeChatTime"></span>
+                      </div>
+                    </div>
+                  </div>
+                  <button type="button" class="m3-btn m3-btn-tonal" id="btnDeleteCurrentChat" style="padding: 6px 10px;" title="Удалить этот чат" onclick="deleteCurrentActiveChat()">
+                    <span class="material-symbols-rounded" style="font-size: 18px; color: #ffb4c2;">delete</span>
+                  </button>
+                </div>
+
+                <!-- Messages Scrollable Body -->
+                <div id="activeChatMessages" class="m3-chat-messages-container">
+                  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 220px; color: #8e8893; gap: 12px; text-align: center; padding: 20px;">
+                    <span class="material-symbols-rounded" style="font-size: 40px; color: #4f378b;">chat_bubble_outline</span>
+                    <div>Напишите сообщение ниже или задайте вопрос голосом Станции.<br><span style="font-size: 0.78rem; color: #6b6670;">Контекст диалога сохраняется в течение 1 часа с последнего сообщения.</span></div>
+                  </div>
+                </div>
+
+                <!-- Chat Input Bar -->
+                <div class="m3-chat-input-bar">
+                  <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="text" class="m3-input" id="chatInputText" placeholder="Написать ассистенту..." style="flex: 1;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}">
+                    <label style="display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #c7c2c9; cursor: pointer; user-select: none; white-space: nowrap;">
+                      <input type="checkbox" id="chatSpeakToggle" checked style="accent-color: #ffb4c2;">
+                      <span class="material-symbols-rounded" style="font-size: 16px;">volume_up</span>
+                      <span>Озвучить</span>
+                    </label>
+                    <button type="button" class="m3-btn m3-btn-primary" id="btnSendChatMessage" onclick="sendChatMessage()" style="padding: 0 18px; min-width: 60px;">
+                      <span class="material-symbols-rounded">send</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- LLM Brain Settings -->
@@ -2121,6 +2328,286 @@
       } catch (e) {}
     }
 
+    
+    // =========================================================================
+    // Chat History & Multi-turn Session Management
+    // =========================================================================
+    let currentChatId = null;
+    let chatSessionsCache = [];
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function formatChatTimestamp(ts) {
+      if (!ts) return '';
+      const d = new Date(ts * 1000);
+      const now = new Date();
+      if (d.toDateString() === now.toDateString()) {
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+      return d.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function formatTimeShort(ts) {
+      if (!ts) return '';
+      const d = new Date(ts * 1000);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    async function loadChatsList(selectId) {
+      try {
+        const res = await fetch('/api/chats');
+        if (!res.ok) return;
+        const d = await res.json();
+        chatSessionsCache = d.chats || [];
+        renderSessionsSidebar();
+
+        const countEl = document.getElementById('chatSessionsCount');
+        if (countEl) countEl.innerText = chatSessionsCache.length;
+
+        if (selectId) {
+          selectChat(selectId);
+        } else if (currentChatId) {
+          const stillExists = chatSessionsCache.some(c => c.id === currentChatId);
+          if (stillExists) {
+            selectChat(currentChatId);
+          } else if (chatSessionsCache.length > 0) {
+            selectChat(chatSessionsCache[0].id);
+          } else {
+            showEmptyChatState();
+          }
+        } else if (chatSessionsCache.length > 0) {
+          selectChat(chatSessionsCache[0].id);
+        } else {
+          showEmptyChatState();
+        }
+      } catch (e) {
+        console.error('Failed to load chats:', e);
+      }
+    }
+
+    function renderSessionsSidebar() {
+      const container = document.getElementById('chatSessionsList');
+      if (!container) return;
+
+      if (chatSessionsCache.length === 0) {
+        container.innerHTML = '<div style="text-align: center; color: #8e8893; padding: 24px 10px; font-size: 0.8rem;">Нет активных чатов.<br>Нажмите «Новый чат» или спросите Станцию.</div>';
+        return;
+      }
+
+      container.innerHTML = chatSessionsCache.map(s => {
+        const isActive = s.is_active;
+        const badgeClass = isActive ? 'active' : 'inactive';
+        const badgeText = isActive ? 'Активен (<1ч)' : 'Завершён';
+        const isSelected = s.id === currentChatId;
+        const dateStr = formatChatTimestamp(s.updated_at);
+        const escapedTitle = escapeHtml(s.title);
+
+        return `
+          <div class="m3-chat-session-item ${isSelected ? 'active' : ''}" onclick="selectChat('${s.id}')">
+            <div style="overflow: hidden; flex: 1;">
+              <div style="font-weight: 700; font-size: 0.84rem; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                ${escapedTitle}
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px; margin-top: 3px;">
+                <span class="m3-chat-badge ${badgeClass}" style="font-size: 0.62rem; padding: 1px 6px;">${badgeText}</span>
+                <span style="font-size: 0.68rem; color: #8e8893;">${dateStr}</span>
+              </div>
+            </div>
+            <button type="button" style="background: none; border: none; color: #8e8893; cursor: pointer; padding: 4px;" title="Удалить чат" onclick="event.stopPropagation(); deleteChatSession('${s.id}')">
+              <span class="material-symbols-rounded" style="font-size: 16px;">close</span>
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function selectChat(id) {
+      currentChatId = id;
+      renderSessionsSidebar();
+
+      try {
+        const res = await fetch(`/api/chats/${id}`);
+        if (!res.ok) return;
+        const d = await res.json();
+        const chat = d.chat;
+        if (!chat) return;
+
+        // Update Header
+        const titleEl = document.getElementById('activeChatTitle');
+        if (titleEl) titleEl.innerText = chat.title || 'Диалог';
+
+        const badge = document.getElementById('activeChatStatusBadge');
+        const nowSecs = Math.floor(Date.now() / 1000);
+        const lastMsgTs = (chat.messages && chat.messages.length > 0)
+          ? chat.messages[chat.messages.length - 1].timestamp
+          : chat.updated_at;
+        const isActive = (nowSecs - lastMsgTs) < 3600;
+
+        if (badge) {
+          badge.className = 'm3-chat-badge ' + (isActive ? 'active' : 'inactive');
+          badge.innerText = isActive ? 'Контекст активен (< 1 ч)' : 'Контекст завершён (> 1 ч)';
+        }
+
+        const timeEl = document.getElementById('activeChatTime');
+        if (timeEl) {
+          timeEl.innerText = formatChatTimestamp(chat.updated_at);
+        }
+
+        // Render Messages
+        const container = document.getElementById('activeChatMessages');
+        if (!chat.messages || chat.messages.length === 0) {
+          container.innerHTML = '<div style="text-align: center; color: #8e8893; padding: 30px;">Чат пуст. Напишите первое сообщение ниже.</div>';
+        } else {
+          container.innerHTML = chat.messages.map(m => {
+            const isUser = m.role === 'user';
+            const roleClass = isUser ? 'user' : 'assistant';
+            const timeStr = formatTimeShort(m.timestamp);
+            let extraBadge = '';
+            if (!isUser && m.action && m.action !== 'none') {
+              extraBadge += `<div style="font-size: 0.72rem; color: #ffb4c2; margin-top: 4px; display: flex; align-items: center; gap: 4px;"><span class="material-symbols-rounded" style="font-size: 14px;">bolt</span>Действие: ${m.action}${m.song ? ' (' + escapeHtml(m.song) + ')' : ''}</div>`;
+            }
+            return `
+              <div class="m3-msg-row ${roleClass}">
+                <div class="m3-msg-bubble">
+                  <div>${escapeHtml(m.text)}</div>
+                  ${extraBadge}
+                  <div class="m3-msg-time">${timeStr}</div>
+                </div>
+              </div>
+            `;
+          }).join('');
+          container.scrollTop = container.scrollHeight;
+        }
+      } catch (e) {
+        console.error('Failed to load chat details:', e);
+      }
+    }
+
+    async function createNewChatSession() {
+      try {
+        const res = await fetch('/api/chats/new', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'Новый диалог' })
+        });
+        if (!res.ok) return;
+        const d = await res.json();
+        await loadChatsList(d.chat.id);
+        const input = document.getElementById('chatInputText');
+        if (input) input.focus();
+      } catch (e) {
+        console.error('Failed to create new chat:', e);
+      }
+    }
+
+    async function deleteChatSession(id) {
+      if (!confirm('Удалить этот чат из истории?')) return;
+      try {
+        await fetch(`/api/chats/${id}`, { method: 'DELETE' });
+        if (currentChatId === id) currentChatId = null;
+        await loadChatsList();
+      } catch (e) {
+        console.error('Failed to delete chat:', e);
+      }
+    }
+
+    async function deleteCurrentActiveChat() {
+      if (!currentChatId) return;
+      await deleteChatSession(currentChatId);
+    }
+
+    async function clearAllChatSessions() {
+      if (!confirm('Вы уверены, что хотите удалить ВСЮ историю чатов? Это действие необратимо.')) return;
+      try {
+        await fetch('/api/chats', { method: 'DELETE' });
+        currentChatId = null;
+        await loadChatsList();
+      } catch (e) {
+        console.error('Failed to clear chats:', e);
+      }
+    }
+
+    async function sendChatMessage() {
+      const input = document.getElementById('chatInputText');
+      const text = input ? input.value.trim() : '';
+      if (!text) return;
+
+      const speak = document.getElementById('chatSpeakToggle') ? document.getElementById('chatSpeakToggle').checked : true;
+      input.value = '';
+
+      const container = document.getElementById('activeChatMessages');
+      const tempUserHtml = `
+        <div class="m3-msg-row user">
+          <div class="m3-msg-bubble">
+            <div>${escapeHtml(text)}</div>
+            <div class="m3-msg-time">Отправка...</div>
+          </div>
+        </div>
+      `;
+      container.insertAdjacentHTML('beforeend', tempUserHtml);
+      container.scrollTop = container.scrollHeight;
+
+      const sendBtn = document.getElementById('btnSendChatMessage');
+      if (sendBtn) sendBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: text,
+            speak: speak,
+            session_id: currentChatId
+          })
+        });
+        const d = await res.json();
+        if (d.session_id) {
+          currentChatId = d.session_id;
+        }
+        await loadChatsList(currentChatId);
+      } catch (e) {
+        container.insertAdjacentHTML('beforeend', `
+          <div class="m3-msg-row assistant">
+            <div class="m3-msg-bubble" style="color: #ffb4c2;">
+              Ошибка: ${escapeHtml(e.message)}
+            </div>
+          </div>
+        `);
+        container.scrollTop = container.scrollHeight;
+      } finally {
+        if (sendBtn) sendBtn.disabled = false;
+      }
+    }
+
+    function showEmptyChatState() {
+      const titleEl = document.getElementById('activeChatTitle');
+      if (titleEl) titleEl.innerText = 'Нет активного чата';
+      const badge = document.getElementById('activeChatStatusBadge');
+      if (badge) {
+        badge.className = 'm3-chat-badge inactive';
+        badge.innerText = 'Ожидание';
+      }
+      const timeEl = document.getElementById('activeChatTime');
+      if (timeEl) timeEl.innerText = '';
+      const msgContainer = document.getElementById('activeChatMessages');
+      if (msgContainer) {
+        msgContainer.innerHTML = `
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 220px; color: #8e8893; gap: 12px; text-align: center; padding: 20px;">
+            <span class="material-symbols-rounded" style="font-size: 40px; color: #4f378b;">chat</span>
+            <div>Нажмите «Новый чат» или отправьте вопрос ниже</div>
+          </div>
+        `;
+      }
+    }
+
     function switchTab(tab) {
       updateWatermarks(tab);
       currentTab = tab;
@@ -2131,6 +2618,9 @@
       if (activeContent) activeContent.classList.add('active');
       if (activeNav) activeNav.classList.add('active');
 
+      if (tab === 'assistant') {
+        loadChatsList();
+      }
       if (tab === 'settings') {
         fetchWifiStatus();
         fetchSavedWifi();
@@ -2278,6 +2768,7 @@
           body: JSON.stringify({ action })
         });
         fetchStatus();
+    loadChatsList();
     checkDualBoot();
     fetchYtStatus();
       } catch (e) {
