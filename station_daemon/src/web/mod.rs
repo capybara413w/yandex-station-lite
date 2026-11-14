@@ -1846,6 +1846,22 @@ async fn get_assistant_config_handler(State(state): State<AppState>) -> impl Int
 
     let stt_prov = cfg.stt.provider.trim().to_lowercase();
     let (stt_key, stt_model, stt_account_id, stt_custom_url) = match stt_prov.as_str() {
+        "gemini" => (
+            if !cfg.stt.gemini_api_key.is_empty() {
+                cfg.stt.gemini_api_key.as_str()
+            } else if !cfg.deepseek.gemini_api_key.is_empty() {
+                cfg.deepseek.gemini_api_key.as_str()
+            } else {
+                cfg.stt.api_key.as_str()
+            },
+            if !cfg.stt.gemini_model.is_empty() {
+                cfg.stt.gemini_model.clone()
+            } else {
+                "gemini-flash-lite-latest".to_string()
+            },
+            None,
+            None,
+        ),
         "openrouter" => (
             if !cfg.stt.openrouter_api_key.is_empty() {
                 cfg.stt.openrouter_api_key.as_str()
@@ -2094,6 +2110,8 @@ async fn post_assistant_config_handler(
             if !m_clean.is_empty() {
                 if cfg.stt.provider == "openrouter" {
                     cfg.stt.openrouter_model = m_clean.to_string();
+                } else if cfg.stt.provider == "gemini" {
+                    cfg.stt.gemini_model = m_clean.to_string();
                 } else {
                     cfg.stt.model = m_clean.to_string();
                 }
@@ -2104,6 +2122,8 @@ async fn post_assistant_config_handler(
             if !k_clean.is_empty() && !k_clean.starts_with('*') {
                 if cfg.stt.provider == "openrouter" {
                     cfg.stt.openrouter_api_key = k_clean.to_string();
+                } else if cfg.stt.provider == "gemini" {
+                    cfg.stt.gemini_api_key = k_clean.to_string();
                 } else {
                     cfg.stt.api_key = k_clean.to_string();
                 }

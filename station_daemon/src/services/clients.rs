@@ -742,6 +742,129 @@ impl SttClient for LocalSttClient {
     }
 }
 
+/// Google Gemini Multimodal STT Client
+pub struct GeminiSttClient {
+    pub client: Client,
+    pub api_key: String,
+    pub model: String,
+    pub extra_payload: Option<Value>,
+}
+
+impl GeminiSttClient {
+    pub fn new(
+        client: Client,
+        api_key: String,
+        model: String,
+        extra_payload: Option<Value>,
+    ) -> Self {
+        Self {
+            client,
+            api_key,
+            model,
+            extra_payload,
+        }
+    }
+}
+
+impl SttClient for GeminiSttClient {
+    fn transcribe<'a>(
+        &'a self,
+        wav_bytes: &'a [u8],
+    ) -> BoxFuture<'a, Result<String, String>> {
+        Box::pin(async move {
+            let key = self.api_key.trim();
+            if key.is_empty() {
+                return Err("Gemini STT API key is empty".to_string());
+            }
+
+            let model = if self.model.trim().is_empty() {
+                "gemini-flash-lite-latest"
+            } else {
+                self.model.trim()
+            };
+
+            use base64::Engine;
+            let audio_b64 = base64::prelude::BASE64_STANDARD.encode(wav_bytes);
+
+            let prompt_text = "Transcribe the spoken audio recording accurately into text. Output ONLY the raw transcribed spoken words in Russian. Do not include quotes, explanations, prefixes, punctuation notes, or markdown. If the audio is silent or contains only noise, return an empty response.";
+
+            let mut body = serde_json::json!({
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "inline_data": {
+                                    "mime_type": "audio/wav",
+                                    "data": audio_b64
+                                }
+                            },
+                            {
+                                "text": prompt_text
+                            }
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.0,
+                    "maxOutputTokens": 250
+                }
+            });
+
+            if let Some(extra) = &self.extra_payload {
+                if let Some(map) = extra.as_object() {
+                    for (k, v) in map {
+                        if k == "temperature" || k == "maxOutputTokens" || k == "topP" || k == "topK" {
+                            body["generationConfig"][k] = v.clone();
+                        }
+                    }
+                }
+            }
+
+            let url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+                model, key
+            );
+
+            info!("Calling Google Gemini Multimodal STT (model: {}, audio size: {} bytes)...", model, wav_bytes.len());
+
+            let res = self
+                .client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| format!("Gemini STT request failed: {}", e))?;
+
+            if !res.status().is_success() {
+                let status = res.status();
+                let err_txt = res.text().await.unwrap_or_default();
+                return Err(format!("Gemini STT HTTP {}: {}", status, err_txt));
+            }
+
+            let val: Value = res
+                .json()
+                .await
+                .map_err(|e| format!("Invalid JSON from Gemini STT: {}", e))?;
+
+            let transcript = val["candidates"][0]["content"]["parts"][0]["text"]
+                .as_str()
+                .unwrap_or("")
+                .trim();
+
+            let clean = transcript
+                .trim_matches(|c| c == '"' || c == '\'' || c == '`' || c == '\n' || c == '\r')
+                .trim();
+
+            if clean.is_empty() {
+                return Err("Gemini STT: empty transcript or silence".to_string());
+            }
+
+            Ok(clean.to_string())
+        })
+    }
+}
+
 // ============================================================================
 // 3. TTS Client Architecture
 // ============================================================================

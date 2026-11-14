@@ -51,62 +51,69 @@ pub fn extract_wakeword(text: &str, target_phrase: &str) -> Option<Option<String
     }
 }
 
-/// Ensures the authentic Yandex Station spotter chime WAV is converted and ready in /tmp/spotter_start.wav.
-pub fn ensure_chime_prepared() -> Result<String, String> {
-    let wav_path = "/tmp/spotter_start.wav";
-    if Path::new(wav_path).exists() {
-        return Ok(wav_path.to_string());
+/// Synthesizes a clean, pleasant two-tone assistant chime (587Hz -> 880Hz) in-memory.
+/// 100% original mathematical synthesis (zero external copyrighted sound files).
+pub fn generate_custom_chime_wav() -> Vec<u8> {
+    let sample_rate: u32 = 48000;
+    let mut pcm: Vec<i16> = Vec::with_capacity((sample_rate / 3) as usize * 2);
+
+    // Tone 1: 587.33 Hz (D5) for 95ms with smooth sine window envelope
+    let n1_samples = (sample_rate as f32 * 0.095) as usize;
+    for i in 0..n1_samples {
+        let t = i as f32 / sample_rate as f32;
+        let env = f32::sin((i as f32 / n1_samples as f32) * std::f32::consts::PI);
+        let sample = (f32::sin(2.0 * std::f32::consts::PI * 587.33 * t) * env * 24000.0) as i16;
+        pcm.push(sample);
+        pcm.push(sample);
     }
 
-    let opus_src = "/system/vendor/quasar/sounds/common/spotter_start.opus";
-    if !Path::new(opus_src).exists() {
-        return Err(format!("Spotter chime not found at {}", opus_src));
+    // Short gap 15ms
+    let gap = (sample_rate as f32 * 0.015) as usize;
+    for _ in 0..gap {
+        pcm.push(0);
+        pcm.push(0);
     }
 
-    let ffmpeg_bin = if Path::new("/opt/bin/ffmpeg").exists() {
-        "/opt/bin/ffmpeg"
-    } else if Path::new("/usr/bin/ffmpeg").exists() {
-        "/usr/bin/ffmpeg"
-    } else {
-        "ffmpeg"
-    };
-
-    let status = Command::new(ffmpeg_bin)
-        .args([
-            "-y",
-            "-i", opus_src,
-            "-ar", "48000",
-            "-ac", "2",
-            "-f", "wav",
-            wav_path,
-        ])
-        .output()
-        .map_err(|e| format!("Failed to convert spotter chime: {}", e))?;
-
-    if status.status.success() && Path::new(wav_path).exists() {
-        Ok(wav_path.to_string())
-    } else {
-        Err(format!("ffmpeg chime conversion failed: {:?}", status))
+    // Tone 2: 880.00 Hz (A5) for 160ms with smooth exponential decay
+    let n2_samples = (sample_rate as f32 * 0.16) as usize;
+    for i in 0..n2_samples {
+        let t = i as f32 / sample_rate as f32;
+        let env = f32::exp(-(i as f32) / (n2_samples as f32 * 0.35));
+        let sample = (f32::sin(2.0 * std::f32::consts::PI * 880.0 * t) * env * 26000.0) as i16;
+        pcm.push(sample);
+        pcm.push(sample);
     }
+
+    let mut bytes = Vec::with_capacity(pcm.len() * 2);
+    for s in pcm {
+        bytes.extend_from_slice(&s.to_le_bytes());
+    }
+
+    pcm_to_wav(&bytes, 48000, 2, 16)
 }
 
-/// Plays the authentic Yandex Station spotter chime to ALSA playback device.
-pub fn play_spotter_chime(playback_card: &str) {
-    let _ = ensure_chime_prepared();
-    let wav_path = "/tmp/spotter_start.wav";
-    if Path::new(wav_path).exists() {
-        let aplay_bin = if Path::new("/opt/bin/aplay").exists() {
-            "/opt/bin/aplay"
-        } else if Path::new("/usr/bin/aplay").exists() {
-            "/usr/bin/aplay"
-        } else {
-            "aplay"
-        };
-
-        let _ = Command::new(aplay_bin)
-            .args(["-D", playback_card, "-q", wav_path])
-            .output();
+/// Plays the custom synthesized assistant chime to ALSA playback device.
+pub fn play_assistant_chime(playback_card: &str) {
+    let wav_path = "/tmp/assistant_chime.wav";
+    if !Path::new(wav_path).exists() {
+        let wav = generate_custom_chime_wav();
+        let _ = std::fs::write(wav_path, wav);
     }
+
+    // Free any stale playback on hw:0,0
+    let _ = Command::new("killall").args(["-9", "aplay"]).output();
+
+    let aplay_bin = if Path::new("/opt/bin/aplay").exists() {
+        "/opt/bin/aplay"
+    } else if Path::new("/usr/bin/aplay").exists() {
+        "/usr/bin/aplay"
+    } else {
+        "aplay"
+    };
+
+    let _ = Command::new(aplay_bin)
+        .args(["-D", playback_card, "-q", wav_path])
+        .output();
 }
 
 pub struct WakeWordService {
@@ -195,8 +202,11 @@ impl WakeWordService {
                 self.record_device, self.sample_rate
             );
 
-            // Pre-convert chime on startup so it's instantly available without delay
-            let _ = ensure_chime_prepared();
+            // Pre-generate chime on startup so it's instantly available without delay
+            let chime_path = "/tmp/assistant_chime.wav";
+            if !Path::new(chime_path).exists() {
+                let _ = std::fs::write(chime_path, generate_custom_chime_wav());
+            }
 
             let rt_handle = tokio::runtime::Handle::current();
 
@@ -362,8 +372,8 @@ impl WakeWordService {
                                             // 2. Set Alice Purple LED (180, 0, 255)
                                             self.led.set_rgb(180, 0, 255);
 
-                                            // 3. Play authentic spotter chime
-                                            play_spotter_chime(&self.playback_card);
+                                            // 3. Play pleasant custom assistant chime
+                                            play_assistant_chime(&self.playback_card);
 
                                             // 4. Send trigger to assistant engine
                                             let _ = rt_handle.block_on(trigger_tx.send(cmd_opt));

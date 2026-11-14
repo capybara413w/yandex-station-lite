@@ -1,24 +1,26 @@
-use crate::config::{ProxyConfig, SttConfig};
+use crate::config::{AppConfig, ProxyConfig, SttConfig};
 use crate::hardware::LedController;
 use crate::services::clients::{
-    BoxFuture, CloudflareSttClient, LocalSttClient, OpenRouterSttClient, SttClient,
+    BoxFuture, CloudflareSttClient, GeminiSttClient, LocalSttClient, OpenRouterSttClient, SttClient,
 };
 use reqwest::multipart::{Form, Part};
 use reqwest::Client;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
 pub struct SttService {
     record_device: String,
     sample_rate: u32,
-    config: SttConfig,
+    config: Arc<RwLock<AppConfig>>,
     client: Client,
 }
 
 impl SttService {
-    pub fn new(record_device: String, sample_rate: u32, config: SttConfig, proxy: &ProxyConfig) -> Self {
+    pub fn new(record_device: String, sample_rate: u32, config: Arc<RwLock<AppConfig>>, proxy: &ProxyConfig) -> Self {
         let mut builder = Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .connect_timeout(std::time::Duration::from_secs(10))
@@ -84,16 +86,19 @@ impl SttService {
             let mut recorded: Vec<u8> = Vec::with_capacity(16000 * 2 * max_secs as usize);
 
             let mut speech_started = false;
+            let mut speech_chunks: usize = 0;
             let mut silence_chunks: usize = 0;
             let mut total_chunks: usize = 0;
             let mut noise_floor_sum: f64 = 0.0;
             let mut noise_samples_count: usize = 0;
             let max_total_chunks = (max_secs * 20) as usize; // 20 chunks per second
 
-            // Silence duration after speech to consider sentence finished: ~850ms = 17 chunks
-            let max_silence_chunks = 17;
-            // Timeout if user never starts speaking: 5.5s = 110 chunks
-            let max_idle_chunks = 110;
+            // Silence duration after speech to consider sentence finished: ~900ms = 18 chunks
+            let max_silence_chunks = 18;
+            // Minimum speech duration before silence cutoff can terminate: ~2.2 seconds (44 chunks)
+            let min_speech_chunks = 44;
+            // Timeout if user never starts speaking: 6.0s = 120 chunks
+            let max_idle_chunks = 120;
 
             loop {
                 if stdout.read_exact(&mut chunk).is_err() {
@@ -142,11 +147,12 @@ impl SttService {
                     }
                 } else {
                     recorded.extend_from_slice(&chunk);
+                    speech_chunks += 1;
 
                     if rms < silence_threshold {
                         silence_chunks += 1;
-                        if silence_chunks >= max_silence_chunks {
-                            // User finished speaking!
+                        if silence_chunks >= max_silence_chunks && speech_chunks >= min_speech_chunks {
+                            // User finished speaking and minimum duration satisfied!
                             break;
                         }
                     } else {
@@ -193,8 +199,8 @@ impl SttService {
             .args(["-9", "quasar_launcher2", "rootkeeper.sh", "maind"])
             .output();
 
-        // 3. Indicate Blue: "Listening" (0, 100, 255)
-        led.set_rgb(0, 100, 255);
+        // 3. Start pulsing/breathing animation: "Listening" (0, 160, 255)
+        let pulse_stop = led.start_breathing(0, 160, 255);
         info!(
             "Microphone recording started with VAD (device: {}, mono 16kHz raw PCM)...",
             self.record_device
@@ -202,6 +208,8 @@ impl SttService {
 
         // 4. Capture speech with Voice Activity Detection (up to 15 seconds max)
         let pcm_res = self.record_pcm_with_vad(15).await;
+        // Stop breathing animation immediately once recording concludes
+        pulse_stop.store(false, std::sync::atomic::Ordering::Relaxed);
 
         let audio_bytes = match pcm_res {
             Ok(b) if !b.is_empty() => b,
@@ -240,20 +248,55 @@ impl SttService {
 
     /// Transcribes WAV audio bytes using the configured STT provider.
     pub async fn transcribe_wav(&self, wav_bytes: &[u8]) -> Result<String, String> {
-        let provider = self.config.provider.to_lowercase();
+        let (stt_cfg, gemini_api_key) = {
+            let cfg = self.config.read().await;
+            (cfg.stt.clone(), cfg.deepseek.gemini_api_key.clone())
+        };
+
+        let provider = stt_cfg.provider.to_lowercase();
+
+        // Check if Cloudflare credentials are unset/default placeholder
+        let cf_dummy = stt_cfg.account_id.is_empty()
+            || stt_cfg.account_id.contains("YOUR_CLOUDFLARE")
+            || stt_cfg.api_key.contains("YOUR_CLOUDFLARE");
+        let has_gemini = !stt_cfg.gemini_api_key.is_empty() || !gemini_api_key.is_empty();
+
+        // 1. Google Gemini Multimodal STT (Explicit or seamless fallback when CF is not configured)
+        if provider == "gemini" || ((provider == "cloudflare" || provider == "workers_ai") && cf_dummy && has_gemini) {
+            let key = if !stt_cfg.gemini_api_key.is_empty() {
+                stt_cfg.gemini_api_key.clone()
+            } else {
+                gemini_api_key.clone()
+            };
+            let model = if !stt_cfg.gemini_model.is_empty() {
+                stt_cfg.gemini_model.clone()
+            } else {
+                "gemini-flash-lite-latest".to_string()
+            };
+            if provider != "gemini" {
+                info!("Cloudflare STT account_id not set; seamlessly routing STT to Google Gemini...");
+            }
+            let client = GeminiSttClient::new(
+                self.client.clone(),
+                key,
+                model,
+                stt_cfg.extra_payload.clone(),
+            );
+            return client.transcribe(wav_bytes).await;
+        }
 
         if provider == "openrouter" {
-            let key = if !self.config.openrouter_api_key.is_empty() {
-                self.config.openrouter_api_key.clone()
+            let key = if !stt_cfg.openrouter_api_key.is_empty() {
+                stt_cfg.openrouter_api_key.clone()
             } else {
-                self.config.api_key.clone()
+                stt_cfg.api_key.clone()
             };
             let client = OpenRouterSttClient::new(
                 self.client.clone(),
                 key,
-                self.config.openrouter_model.clone(),
-                self.config.language.clone(),
-                self.config.extra_payload.clone(),
+                stt_cfg.openrouter_model.clone(),
+                stt_cfg.language.clone(),
+                stt_cfg.extra_payload.clone(),
             );
             return client.transcribe(wav_bytes).await;
         }
@@ -261,10 +304,10 @@ impl SttService {
         if provider == "cloudflare" || provider == "workers_ai" {
             let client = CloudflareSttClient::new(
                 self.client.clone(),
-                self.config.account_id.clone(),
-                self.config.api_key.clone(),
-                self.config.model.clone(),
-                self.config.extra_payload.clone(),
+                stt_cfg.account_id.clone(),
+                stt_cfg.api_key.clone(),
+                stt_cfg.model.clone(),
+                stt_cfg.extra_payload.clone(),
             );
             return client.transcribe(wav_bytes).await;
         }
@@ -272,26 +315,26 @@ impl SttService {
         if provider == "custom" || provider == "local" {
             let client = LocalSttClient::new(
                 self.client.clone(),
-                self.config.custom_url.clone(),
-                self.config.api_key.clone(),
-                self.config.extra_payload.clone(),
+                stt_cfg.custom_url.clone(),
+                stt_cfg.api_key.clone(),
+                stt_cfg.extra_payload.clone(),
             );
             return client.transcribe(wav_bytes).await;
         }
 
         let trans_res = match provider.as_str() {
             "openai" => {
-                let key = if !self.config.openai_api_key.is_empty() {
-                    &self.config.openai_api_key
+                let key = if !stt_cfg.openai_api_key.is_empty() {
+                    &stt_cfg.openai_api_key
                 } else {
-                    &self.config.api_key
+                    &stt_cfg.api_key
                 };
                 if key.is_empty() {
                     warn!("OpenAI STT API key not configured");
                     return Err("OpenAI STT API key not configured".to_string());
                 }
-                let model = if !self.config.openai_model.is_empty() {
-                    &self.config.openai_model
+                let model = if !stt_cfg.openai_model.is_empty() {
+                    &stt_cfg.openai_model
                 } else {
                     "whisper-1"
                 };
@@ -303,8 +346,8 @@ impl SttService {
                 let mut form = Form::new()
                     .part("file", part)
                     .text("model", model.to_string());
-                if !self.config.language.is_empty() {
-                    form = form.text("language", self.config.language.clone());
+                if !stt_cfg.language.is_empty() {
+                    form = form.text("language", stt_cfg.language.clone());
                 }
                 self.client
                     .post("https://api.openai.com/v1/audio/transcriptions")
@@ -314,17 +357,17 @@ impl SttService {
                     .await
             }
             "groq" => {
-                let key = if !self.config.groq_api_key.is_empty() {
-                    &self.config.groq_api_key
+                let key = if !stt_cfg.groq_api_key.is_empty() {
+                    &stt_cfg.groq_api_key
                 } else {
-                    &self.config.api_key
+                    &stt_cfg.api_key
                 };
                 if key.is_empty() {
                     warn!("Groq STT API key not configured");
                     return Err("Groq STT API key not configured".to_string());
                 }
-                let model = if !self.config.groq_model.is_empty() {
-                    &self.config.groq_model
+                let model = if !stt_cfg.groq_model.is_empty() {
+                    &stt_cfg.groq_model
                 } else {
                     "whisper-large-v3-turbo"
                 };
@@ -336,8 +379,8 @@ impl SttService {
                 let mut form = Form::new()
                     .part("file", part)
                     .text("model", model.to_string());
-                if !self.config.language.is_empty() {
-                    form = form.text("language", self.config.language.clone());
+                if !stt_cfg.language.is_empty() {
+                    form = form.text("language", stt_cfg.language.clone());
                 }
                 self.client
                     .post("https://api.groq.com/openai/v1/audio/transcriptions")
@@ -347,22 +390,22 @@ impl SttService {
                     .await
             }
             "deepgram" => {
-                let key = if !self.config.deepgram_api_key.is_empty() {
-                    &self.config.deepgram_api_key
+                let key = if !stt_cfg.deepgram_api_key.is_empty() {
+                    &stt_cfg.deepgram_api_key
                 } else {
-                    &self.config.api_key
+                    &stt_cfg.api_key
                 };
                 if key.is_empty() {
                     warn!("Deepgram STT API key not configured");
                     return Err("Deepgram STT API key not configured".to_string());
                 }
-                let model = if !self.config.deepgram_model.is_empty() {
-                    &self.config.deepgram_model
+                let model = if !stt_cfg.deepgram_model.is_empty() {
+                    &stt_cfg.deepgram_model
                 } else {
                     "nova-2"
                 };
-                let lang = if !self.config.language.is_empty() {
-                    &self.config.language
+                let lang = if !stt_cfg.language.is_empty() {
+                    &stt_cfg.language
                 } else {
                     "ru"
                 };
@@ -382,10 +425,10 @@ impl SttService {
             _ => {
                 let fallback = CloudflareSttClient::new(
                     self.client.clone(),
-                    self.config.account_id.clone(),
-                    self.config.api_key.clone(),
-                    self.config.model.clone(),
-                    self.config.extra_payload.clone(),
+                    stt_cfg.account_id.clone(),
+                    stt_cfg.api_key.clone(),
+                    stt_cfg.model.clone(),
+                    stt_cfg.extra_payload.clone(),
                 );
                 return fallback.transcribe(wav_bytes).await;
             }

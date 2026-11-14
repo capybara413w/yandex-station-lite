@@ -8,7 +8,7 @@ use hardware::{
     AudioHardware, ButtonsListener, LedController, NetworkHardware, StationButtonEvent,
 };
 use services::{
-    play_spotter_chime, ChatService, DeepSeekService, PlayerService, ProxyBridge,
+    play_assistant_chime, ChatService, DeepSeekService, PlayerService, ProxyBridge,
     SoundCloudService, SttService, TtsService, VisualizerService, WakeWordService, YtMusicService,
 };
 use std::net::SocketAddr;
@@ -94,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stt = Arc::new(SttService::new(
         initial_config.audio.record_device.clone(),
         initial_config.audio.sample_rate,
-        initial_config.stt.clone(),
+        config.clone(),
         &initial_config.proxy,
     ));
     let (player_instance, autoplay_rx) = PlayerService::new(config.clone());
@@ -212,8 +212,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     player_clone.pause(&led_clone).await;
                     // 2. Illuminate Alice Purple
                     led_clone.set_rgb(180, 0, 255);
-                    // 3. Play authentic spotter chime
-                    play_spotter_chime(&alsa_card_str);
+                    // 3. Play electronic assistant chime
+                    play_assistant_chime(&alsa_card_str);
                     // 4. Trigger assistant turn with VAD
                     let _ = assistant_tx_clone.send(None).await;
                 }

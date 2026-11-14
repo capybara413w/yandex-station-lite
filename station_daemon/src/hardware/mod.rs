@@ -205,6 +205,37 @@ impl LedController {
         self.set_rgb(45, 0, 64);
     }
 
+    /// Starts a smooth breathing (pulsing) LED animation with given RGB base color.
+    /// Returns an Arc<AtomicBool> stop_flag. Set stop_flag.store(false, Ordering::Relaxed) to stop pulsing.
+    pub fn start_breathing(&self, red: u8, green: u8, blue: u8) -> Arc<AtomicBool> {
+        let active = Arc::new(AtomicBool::new(true));
+        let flag = active.clone();
+        let base = self.sysfs_base.clone();
+        let rings = self.rings_count;
+
+        tokio::spawn(async move {
+            let mut step: f32 = 0.0;
+            while flag.load(Ordering::Relaxed) {
+                // Smooth sine wave factor between 0.15 and 1.0
+                let factor = (f32::sin(step) * 0.425 + 0.575).clamp(0.12, 1.0);
+                let r = (red as f32 * factor) as u8;
+                let g = (green as f32 * factor) as u8;
+                let b = (blue as f32 * factor) as u8;
+
+                for i in 1..=rings {
+                    let _ = fs::write(format!("{}/micro:red:ring{}/brightness", base, i), r.to_string());
+                    let _ = fs::write(format!("{}/micro:green:ring{}/brightness", base, i), g.to_string());
+                    let _ = fs::write(format!("{}/micro:blue:ring{}/brightness", base, i), b.to_string());
+                }
+
+                step += 0.14; // smooth breathing rhythm
+                tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
+            }
+        });
+
+        active
+    }
+
     /// Blinks LED color for duration_ms, then restores previous state
     /// (music aura if playing, otherwise off) matching station/buttons_daemon.sh blink().
     pub fn blink(&self, red: u8, green: u8, blue: u8, duration_ms: u64) {

@@ -1085,6 +1085,7 @@
                 <div>
                   <label style="font-size: 0.78rem; font-weight: 700; color: #370014; display: block; margin-bottom: 4px;">Распознавание речи (STT):</label>
                   <select class="m3-quick-select" id="quickStt" onchange="syncProvider('stt', this.value)">
+                    <option value="gemini">Google Gemini Direct (Multimodal Flash)</option>
                     <option value="cloudflare">Cloudflare Workers AI Whisper (@cf/openai/whisper)</option>
                     <option value="openrouter">OpenRouter Whisper</option>
                     <option value="groq">Groq Whisper (~150мс)</option>
@@ -1647,6 +1648,7 @@
             <div class="m3-form-group">
               <label class="m3-label">Провайдер STT:</label>
               <select class="m3-select" id="cfgSttProvider">
+                <option value="gemini">Google Gemini Direct (Multimodal Flash)</option>
                 <option value="cloudflare">Cloudflare Workers AI Whisper (@cf/openai/whisper)</option>
                 <option value="openrouter">OpenRouter Whisper</option>
                 <option value="groq">Groq Whisper</option>

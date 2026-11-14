@@ -23,6 +23,6 @@ pub use soundcloud::SoundCloudService;
 pub use stt::SttService;
 pub use tts::TtsService;
 pub use visualizer::VisualizerService;
-pub use wakeword::{WakeWordService, play_spotter_chime};
+pub use wakeword::{play_assistant_chime, WakeWordService};
 pub use ytmusic::YtMusicService;
 

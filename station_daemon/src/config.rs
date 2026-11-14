@@ -191,6 +191,10 @@ pub struct SttConfig {
     #[serde(default = "default_deepgram_stt_model")]
     pub deepgram_model: String,
     #[serde(default)]
+    pub gemini_api_key: String,
+    #[serde(default = "default_gemini_stt_model")]
+    pub gemini_model: String,
+    #[serde(default)]
     pub custom_url: String,
     #[serde(default)]
     pub extra_payload: Option<serde_json::Value>,
@@ -212,6 +216,8 @@ impl Default for SttConfig {
             groq_model: default_groq_stt_model(),
             deepgram_api_key: String::new(),
             deepgram_model: default_deepgram_stt_model(),
+            gemini_api_key: String::new(),
+            gemini_model: default_gemini_stt_model(),
             custom_url: String::new(),
             extra_payload: None,
         }
@@ -238,6 +244,9 @@ fn default_groq_stt_model() -> String {
 }
 fn default_deepgram_stt_model() -> String {
     "nova-2".to_string()
+}
+fn default_gemini_stt_model() -> String {
+    "gemini-flash-lite-latest".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
