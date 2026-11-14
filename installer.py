@@ -375,23 +375,9 @@ def install_station_daemon(ip, mode="daemon", log_fn=print):
 
     # Setup init hook
     adb_shell(ip, "mount -o remount,rw /")
-    s99_hook = (
-        "#!/bin/sh\\n"
-        "case \\\"$1\\\" in\\n"
-        "  start)\\n"
-        "    if [ -x /data/dualboot.sh ]; then\\n"
-        "      /data/dualboot.sh \\\"$@\\\" &\\n"
-        "    elif [ -x /data/station_daemon ]; then\\n"
-        "      start-stop-daemon -S -b -x /data/station_daemon -m -p /tmp/station_daemon.pid -- 2>/dev/null\\n"
-        "    fi\\n"
-        "    ;;\\n"
-        "  stop)\\n"
-        "    killall -9 station_daemon 2>/dev/null\\n"
-        "    ;;\\n"
-        "esac\\n"
-        "exit 0"
-    )
-    adb_shell(ip, f"printf '%b' '{s99_hook}' > /etc/init.d/S99station_daemon")
+    s99_local = os.path.join(SCRIPT_DIR, "S99station_daemon")
+    if os.path.exists(s99_local):
+        adb_cmd(ip, ["push", s99_local, "/etc/init.d/S99station_daemon"])
     adb_shell(ip, "chmod 755 /etc/init.d/S99station_daemon")
 
     # Disable S99quasar direct autostart to avoid double audio driver conflict
