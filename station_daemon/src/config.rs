@@ -266,6 +266,14 @@ pub struct AudioConfig {
     pub sample_rate: u32,
     #[serde(default = "default_true")]
     pub autoplay: bool,
+    #[serde(default = "default_true")]
+    pub wakeword_enabled: bool,
+    #[serde(default = "default_wakeword_phrase")]
+    pub wakeword_phrase: String,
+}
+
+fn default_wakeword_phrase() -> String {
+    "алиса".to_string()
 }
 
 fn default_true() -> bool {
@@ -583,6 +591,8 @@ impl Default for AppConfig {
                 record_device: default_rec_device(),
                 sample_rate: default_sample_rate(),
                 autoplay: default_true(),
+                wakeword_enabled: default_true(),
+                wakeword_phrase: default_wakeword_phrase(),
             },
             hardware: HardwareConfig {
                 input_event_device: default_input_device(),

@@ -42,7 +42,137 @@ impl SttService {
         }
     }
 
-    /// Records audio from Station microphone (raw Linear PCM, 16-bit, 16000Hz, mono),
+    /// Captures audio from the microphone using real-time Voice Activity Detection (VAD).
+    /// Dynamically tracks speech onset, keeps recording while the user is talking,
+    /// and automatically stops when the user finishes speaking (after ~0.85-1.0s of silence following speech), up to max_secs.
+    pub async fn record_pcm_with_vad(&self, max_secs: u32) -> Result<Vec<u8>, String> {
+        let rec_dev = self.record_device.clone();
+        let rate_str = self.sample_rate.to_string();
+        let arecord_bin = if Path::new("/opt/bin/arecord").exists() {
+            "/opt/bin/arecord"
+        } else if Path::new("/usr/bin/arecord").exists() {
+            "/usr/bin/arecord"
+        } else {
+            "arecord"
+        };
+
+        tokio::task::spawn_blocking(move || {
+            use std::io::Read;
+            use std::collections::VecDeque;
+
+            let mut child = Command::new(arecord_bin)
+                .args([
+                    "-D", &rec_dev,
+                    "-f", "S16_LE",
+                    "-r", &rate_str,
+                    "-c", "1",
+                    "-t", "raw",
+                    "-q",
+                ])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| format!("Failed to spawn arecord: {}", e))?;
+
+            let mut stdout = child.stdout.take()
+                .ok_or_else(|| "Failed to capture arecord stdout".to_string())?;
+
+            // 50ms chunk at 16000Hz, 16-bit mono = 800 samples = 1600 bytes
+            const CHUNK_SIZE: usize = 1600;
+            let mut chunk = vec![0u8; CHUNK_SIZE];
+            let mut pre_roll: VecDeque<Vec<u8>> = VecDeque::with_capacity(8); // ~350ms pre-roll
+            let mut recorded: Vec<u8> = Vec::with_capacity(16000 * 2 * max_secs as usize);
+
+            let mut speech_started = false;
+            let mut silence_chunks: usize = 0;
+            let mut total_chunks: usize = 0;
+            let mut noise_floor_sum: f64 = 0.0;
+            let mut noise_samples_count: usize = 0;
+            let max_total_chunks = (max_secs * 20) as usize; // 20 chunks per second
+
+            // Silence duration after speech to consider sentence finished: ~850ms = 17 chunks
+            let max_silence_chunks = 17;
+            // Timeout if user never starts speaking: 5.5s = 110 chunks
+            let max_idle_chunks = 110;
+
+            loop {
+                if stdout.read_exact(&mut chunk).is_err() {
+                    break;
+                }
+                total_chunks += 1;
+
+                // Compute RMS energy
+                let mut sum_sq: f64 = 0.0;
+                let sample_count = CHUNK_SIZE / 2;
+                for i in 0..sample_count {
+                    let s = i16::from_le_bytes([chunk[i * 2], chunk[i * 2 + 1]]) as f64;
+                    sum_sq += s * s;
+                }
+                let rms = (sum_sq / sample_count as f64).sqrt();
+
+                if total_chunks <= 6 {
+                    noise_floor_sum += rms;
+                    noise_samples_count += 1;
+                }
+
+                let noise_floor = if noise_samples_count > 0 {
+                    noise_floor_sum / noise_samples_count as f64
+                } else {
+                    150.0
+                };
+
+                let speech_threshold = (noise_floor * 1.8).clamp(380.0, 1500.0);
+                let silence_threshold = speech_threshold * 0.65;
+
+                if !speech_started {
+                    if pre_roll.len() >= 7 {
+                        pre_roll.pop_front();
+                    }
+                    pre_roll.push_back(chunk.clone());
+
+                    if rms > speech_threshold {
+                        speech_started = true;
+                        for pr in pre_roll.drain(..) {
+                            recorded.extend_from_slice(&pr);
+                        }
+                    } else if total_chunks >= max_idle_chunks {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err("Таймаут: речь не обнаружена".to_string());
+                    }
+                } else {
+                    recorded.extend_from_slice(&chunk);
+
+                    if rms < silence_threshold {
+                        silence_chunks += 1;
+                        if silence_chunks >= max_silence_chunks {
+                            // User finished speaking!
+                            break;
+                        }
+                    } else {
+                        silence_chunks = 0;
+                    }
+
+                    if total_chunks >= max_total_chunks {
+                        break;
+                    }
+                }
+            }
+
+            let _ = child.kill();
+            let _ = child.wait();
+
+            if recorded.is_empty() {
+                return Err("Записано 0 байт".to_string());
+            }
+
+            Ok(recorded)
+        })
+        .await
+        .map_err(|e| format!("VAD recording thread error: {}", e))?
+    }
+
+    /// Records audio from Station microphone using Voice Activity Detection (VAD),
     /// converts to WAV container and transcribes via selected provider.
     /// Manages /tmp/listen.lock and LED indications (Blue recording, Amber processing, Clear on finish).
     pub async fn record_and_transcribe(&self, led: &LedController) -> Result<String, String> {
@@ -66,60 +196,29 @@ impl SttService {
         // 3. Indicate Blue: "Listening" (0, 100, 255)
         led.set_rgb(0, 100, 255);
         info!(
-            "Microphone recording started (4 seconds, device: {}, mono 16kHz raw PCM)...",
+            "Microphone recording started with VAD (device: {}, mono 16kHz raw PCM)...",
             self.record_device
         );
 
-        let mic_raw = "/tmp/mic.raw";
-        let _ = fs::remove_file(mic_raw);
+        // 4. Capture speech with Voice Activity Detection (up to 15 seconds max)
+        let pcm_res = self.record_pcm_with_vad(15).await;
 
-        let rec_dev = self.record_device.clone();
-        let rate_str = self.sample_rate.to_string();
-
-        let arecord_bin = if Path::new("/opt/bin/arecord").exists() {
-            "/opt/bin/arecord"
-        } else if Path::new("/usr/bin/arecord").exists() {
-            "/usr/bin/arecord"
-        } else {
-            "arecord"
+        let audio_bytes = match pcm_res {
+            Ok(b) if !b.is_empty() => b,
+            Ok(_) => {
+                let _ = fs::remove_file(lock_path);
+                led.clear();
+                return Err("Captured audio is empty".to_string());
+            }
+            Err(e) => {
+                let _ = fs::remove_file(lock_path);
+                led.clear();
+                return Err(e);
+            }
         };
-
-        // 4. Capture 4 seconds of raw Linear PCM (16-bit, mono) via arecord (-t raw)
-        let rec_result = tokio::task::spawn_blocking(move || {
-            Command::new(arecord_bin)
-                .args([
-                    "-D", &rec_dev,
-                    "-f", "S16_LE",
-                    "-r", &rate_str,
-                    "-c", "1",
-                    "-t", "raw",
-                    "-d", "4",
-                    mic_raw,
-                ])
-                .output()
-        })
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?;
-
-        if let Err(e) = rec_result {
-            let _ = fs::remove_file(lock_path);
-            led.clear();
-            error!("arecord execution failed: {}", e);
-            return Err(format!("arecord execution failed: {}", e));
-        }
 
         // 5. Indicate Amber: "Processing" (220, 150, 0)
         led.set_rgb(220, 150, 0);
-
-        let audio_bytes = match fs::read(mic_raw) {
-            Ok(b) if !b.is_empty() => b,
-            _ => {
-                let _ = fs::remove_file(lock_path);
-                led.clear();
-                error!("Captured raw audio file /tmp/mic.raw is empty or missing");
-                return Err("Failed to read captured audio file /tmp/mic.raw".to_string());
-            }
-        };
 
         let wav_bytes = pcm_to_wav(&audio_bytes, self.sample_rate, 1, 16);
 
@@ -329,7 +428,7 @@ impl SttClient for SttService {
 
 /// Prepends a standard 44-byte RIFF/WAV header to raw PCM samples.
 /// If the data already begins with "RIFF", it is returned unchanged.
-fn pcm_to_wav(pcm_data: &[u8], sample_rate: u32, channels: u16, bits_per_sample: u16) -> Vec<u8> {
+pub fn pcm_to_wav(pcm_data: &[u8], sample_rate: u32, channels: u16, bits_per_sample: u16) -> Vec<u8> {
     if pcm_data.starts_with(b"RIFF") {
         return pcm_data.to_vec();
     }

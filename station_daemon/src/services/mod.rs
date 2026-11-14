@@ -7,6 +7,7 @@ pub mod soundcloud;
 pub mod stt;
 pub mod tts;
 pub mod visualizer;
+pub mod wakeword;
 pub mod ytmusic;
 
 pub use chat::{ChatMessageItem, ChatService, ChatSession, ChatSessionSummary};
@@ -22,5 +23,6 @@ pub use soundcloud::SoundCloudService;
 pub use stt::SttService;
 pub use tts::TtsService;
 pub use visualizer::VisualizerService;
+pub use wakeword::{WakeWordService, play_spotter_chime};
 pub use ytmusic::YtMusicService;
 

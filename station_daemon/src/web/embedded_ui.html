@@ -1452,6 +1452,58 @@
       <!-- TAB 3: ASSISTANT -->
       <section id="tab-assistant" class="tab-content">
         <div style="display: flex; flex-direction: column; gap: 20px;">
+
+          <!-- Wake-Word "Алиса" & VAD Voice Control Card -->
+          <div class="m3-surface-card" style="position: relative; overflow: visible;">
+            <div class="m3-card-peeker-container" title="Бойкисер слушает голосовые команды :3">
+              <img class="m3-card-peeker" data-mascot="3" alt="WakeWord Boykisser" />
+            </div>
+            <div class="m3-card-header">
+              <div class="m3-card-title" style="display: flex; align-items: center; gap: 8px;">
+                <span class="material-symbols-rounded" style="color: #b388ff;">mic</span>
+                <span>Голосовая активация (Wake-Word) и VAD</span>
+                <span style="font-size: 0.72rem; font-weight: 700; background: #372844; color: #d1c4e9; padding: 2px 8px; border-radius: 8px;">«Алиса»</span>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <button type="button" id="wakewordToggleBtn" class="m3-btn m3-btn-primary" onclick="toggleWakeword()" style="display: flex; align-items: center; gap: 6px;">
+                  <span class="material-symbols-rounded" id="wakewordToggleIcon" style="font-size: 18px;">hearing</span>
+                  <span id="wakewordToggleText">Активация включена</span>
+                </button>
+              </div>
+            </div>
+
+            <div style="font-size: 0.85rem; color: #a49ea8; line-height: 1.5; margin-bottom: 16px;">
+              Фоновый слушатель непрерывно отслеживает обращение <b style="color: #d1c4e9;">«Алиса»</b> или <b style="color: #ffb4c2;">one-shot команды</b> («Алиса, включи рок»). При обнаружении колонка воспроизводит аутентичный фиолетовый отклик и звук колокольчика, а умный алгоритм <b style="color: #78dc96;">VAD (Voice Activity Detection)</b> сам определяет, когда вы закончили говорить.
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+              <div style="background: #17151a; border-radius: 12px; padding: 12px 16px;">
+                <div style="font-size: 0.72rem; color: #8e8893;">Ключевое слово (Wake-Word):</div>
+                <div style="font-weight: 700; color: #d1c4e9; margin-top: 4px; display: flex; align-items: center; gap: 6px;">
+                  <span class="material-symbols-rounded" style="font-size: 16px; color: #b388ff;">record_voice_over</span>
+                  <span>«Алиса» / «Alice»</span>
+                </div>
+              </div>
+              <div style="background: #17151a; border-radius: 12px; padding: 12px 16px;">
+                <div style="font-size: 0.72rem; color: #8e8893;">Определение конца фразы:</div>
+                <div style="font-weight: 700; color: #78dc96; margin-top: 4px; display: flex; align-items: center; gap: 6px;">
+                  <span class="material-symbols-rounded" style="font-size: 16px;">graphic_eq</span>
+                  <span>Динамический RMS VAD (~0.85 сек тишины)</span>
+                </div>
+              </div>
+              <div style="background: #17151a; border-radius: 12px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
+                <div>
+                  <div style="font-size: 0.72rem; color: #8e8893;">Проверка микрофона:</div>
+                  <div style="font-size: 0.8rem; color: #fff; margin-top: 2px;">Запустить turn сейчас</div>
+                </div>
+                <button type="button" class="m3-btn m3-btn-tonal" onclick="triggerMicNow()" style="padding: 6px 14px; font-size: 0.82rem;">
+                  <span class="material-symbols-rounded" style="font-size: 18px;">mic</span>
+                  <span>Сказать</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
           <!-- System Prompt -->
           <div class="m3-surface-card">
             <div class="m3-card-header">
@@ -2660,6 +2712,9 @@
           if (d.autoplay !== undefined) {
             updateAutoplayUI(d.autoplay);
           }
+          if (d.wakeword_enabled !== undefined) {
+            updateWakewordUI(d.wakeword_enabled);
+          }
           if (d.state) {
             isPlaying = d.state === 'playing';
             document.getElementById('playerStateBadge').innerText = d.state.toUpperCase();
@@ -2790,6 +2845,54 @@
         btn.style.borderColor = 'rgba(255, 255, 255, 0.15)';
         btn.style.color = '#a49ea8';
         btn.style.background = 'transparent';
+      }
+    }
+
+    let isWakewordEnabled = true;
+
+    async function toggleWakeword() {
+      try {
+        const nextState = !isWakewordEnabled;
+        const res = await fetch('/api/wakeword', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: nextState })
+        });
+        const data = await res.json();
+        if (data.enabled !== undefined) {
+          updateWakewordUI(data.enabled);
+        }
+      } catch (e) {
+        console.error('Toggle wakeword error:', e);
+      }
+    }
+
+    function updateWakewordUI(enabled) {
+      isWakewordEnabled = !!enabled;
+      const btn = document.getElementById('wakewordToggleBtn');
+      const icon = document.getElementById('wakewordToggleIcon');
+      const text = document.getElementById('wakewordToggleText');
+      if (!btn) return;
+      if (isWakewordEnabled) {
+        btn.className = 'm3-btn m3-btn-primary';
+        btn.style.background = '#b388ff';
+        btn.style.color = '#1f1338';
+        if (icon) icon.innerText = 'hearing';
+        if (text) text.innerText = 'Активация включена';
+      } else {
+        btn.className = 'm3-btn m3-btn-outlined';
+        btn.style.background = 'transparent';
+        btn.style.color = '#a49ea8';
+        if (icon) icon.innerText = 'hearing_disabled';
+        if (text) text.innerText = 'Активация отключена';
+      }
+    }
+
+    async function triggerMicNow() {
+      try {
+        await fetch('/api/mic/listen', { method: 'POST' });
+      } catch (e) {
+        console.error('Trigger mic error:', e);
       }
     }
 

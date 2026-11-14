@@ -8,8 +8,8 @@ use hardware::{
     AudioHardware, ButtonsListener, LedController, NetworkHardware, StationButtonEvent,
 };
 use services::{
-    ChatService, DeepSeekService, PlayerService, ProxyBridge, SoundCloudService, SttService,
-    TtsService, VisualizerService, YtMusicService,
+    play_spotter_chime, ChatService, DeepSeekService, PlayerService, ProxyBridge,
+    SoundCloudService, SttService, TtsService, VisualizerService, WakeWordService, YtMusicService,
 };
 use std::net::SocketAddr;
 use std::path::Path;
@@ -111,19 +111,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let chat = Arc::new(ChatService::new(chat_storage_path));
 
-    // 5. Button Event Processing Loop — station/buttons_daemon.sh
+    // 5. Assistant Turn Execution Engine (Triggered by Wake-Word or CenterHold)
+    let (assistant_tx, mut assistant_rx) = mpsc::channel::<Option<String>>(16);
+
+    let wakeword = Arc::new(WakeWordService::new(
+        &initial_config,
+        stt.clone(),
+        tts.clone(),
+        player.clone(),
+        led.clone(),
+    ));
+    wakeword.clone().start_worker(assistant_tx.clone());
+
+    let led_ref = led.clone();
+    let stt_ref = stt.clone();
+    let ds_ref = deepseek.clone();
+    let player_ref = player.clone();
+    let sc_ref = soundcloud.clone();
+    let yt_ref = ytmusic.clone();
+    let tts_ref = tts.clone();
+    let chat_ref = chat.clone();
+    let ww_ref = wakeword.clone();
+
+    tokio::spawn(async move {
+        while let Some(initial_prompt) = assistant_rx.recv().await {
+            execute_assistant_turn(
+                initial_prompt,
+                led_ref.clone(),
+                stt_ref.clone(),
+                ds_ref.clone(),
+                player_ref.clone(),
+                sc_ref.clone(),
+                yt_ref.clone(),
+                tts_ref.clone(),
+                chat_ref.clone(),
+                ww_ref.clone(),
+            )
+            .await;
+        }
+    });
+
+    // 6. Button Event Processing Loop — station/buttons_daemon.sh
     let (btn_tx, mut btn_rx) = mpsc::channel::<StationButtonEvent>(32);
     buttons.start(btn_tx.clone());
 
     let audio_clone = audio.clone();
     let led_clone = led.clone();
     let player_clone = player.clone();
-    let soundcloud_clone = soundcloud.clone();
-    let ytmusic_clone = ytmusic.clone();
-    let stt_clone = stt.clone();
-    let deepseek_clone = deepseek.clone();
     let tts_clone = tts.clone();
-    let chat_clone = chat.clone();
+    let assistant_tx_clone = assistant_tx.clone();
+    let alsa_card_str = initial_config.audio.alsa_card.clone();
 
     tokio::spawn(async move {
         while let Some(event) = btn_rx.recv().await {
@@ -171,77 +208,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Center Touch Sensor: Long Hold (>= 0.7 sec)
                 StationButtonEvent::CenterHold => {
                     info!("Hardware Event: CenterHold >= 700ms (Voice Assistant Trigger)");
-
-                    let led_ref = led_clone.clone();
-                    let stt_ref = stt_clone.clone();
-                    let ds_ref = deepseek_clone.clone();
-                    let player_ref = player_clone.clone();
-                    let sc_ref = soundcloud_clone.clone();
-                    let yt_ref = ytmusic_clone.clone();
-                    let tts_ref = tts_clone.clone();
-                    let chat_ref = chat_clone.clone();
-
-                    tokio::spawn(async move {
-                        // 1. Record & transcribe speech
-                        match stt_ref.record_and_transcribe(&led_ref).await {
-                            Ok(recognized_text) => {
-                                info!("Voice command recognized: '{}'", recognized_text);
-
-                                // 2. Multi-turn session & 1-hour rule context
-                                let (session_id, history, _) = chat_ref.prepare_session_for_prompt(None).await;
-
-                                // 3. Send query to DeepSeek with history
-                                match ds_ref.query_with_history(&recognized_text, &history).await {
-                                    Ok(resp) => {
-                                        info!("DeepSeek reply: '{}' (action: {})", resp.text, resp.action);
-
-                                        chat_ref.record_turn(
-                                            &session_id,
-                                            &recognized_text,
-                                            &resp.text,
-                                            &resp.action,
-                                            resp.color,
-                                            &resp.song,
-                                        ).await;
-
-                                        // 4. Native Speech Synthesis (TTS) & Breathing Animation
-                                        if !resp.text.is_empty() {
-                                            let _ = tts_ref.speak(&resp.text, resp.color, &led_ref).await;
-                                        }
-
-                                        // 5. Handle Music Actions via YouTube Music (100% exact match)
-                                        match resp.action.as_str() {
-                                            "play" => {
-                                                let song = if resp.song.is_empty() {
-                                                    "Lofi chill beats"
-                                                } else {
-                                                    &resp.song
-                                                };
-                                                player_ref.play_smart_or_query(&yt_ref, &sc_ref, song, &led_ref).await;
-                                            }
-                                            "stop" => player_ref.stop(&led_ref).await,
-                                            "resume" => player_ref.resume(&led_ref).await,
-                                            _ => {}
-                                        }
-                                    }
-                                    Err(e) => {
-                                        error!("DeepSeek query failed: {}", e);
-                                        led_ref.blink(255, 0, 0, 200);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                warn!("STT recording/transcription failed: {}", e);
-                                led_ref.blink(255, 140, 0, 200);
-                            }
-                        }
-                    });
+                    // 1. Pause music if playing
+                    player_clone.pause(&led_clone).await;
+                    // 2. Illuminate Alice Purple
+                    led_clone.set_rgb(180, 0, 255);
+                    // 3. Play authentic spotter chime
+                    play_spotter_chime(&alsa_card_str);
+                    // 4. Trigger assistant turn with VAD
+                    let _ = assistant_tx_clone.send(None).await;
                 }
             }
         }
     });
 
-    // 6. Launch Axum HTTP Server & Web Control Panel
+    // 7. Launch Axum HTTP Server & Web Control Panel
     let app_state = web::AppState {
         config: config.clone(),
         audio: audio.clone(),
@@ -258,6 +238,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         logs: logs.clone(),
         start_time: std::time::Instant::now(),
         chat: chat.clone(),
+        wakeword: wakeword.clone(),
     };
 
     let router = web::create_router(app_state);
@@ -280,4 +261,94 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, router).await?;
 
     Ok(())
+}
+
+/// Executes a complete Assistant Turn:
+/// - If `initial_prompt` is `Some(cmd)`, uses the one-shot voice command directly (skips recording).
+/// - If `initial_prompt` is `None` (CenterHold or standalone Wake-Word), records speech using real-time VAD.
+/// - Queries LLM with multi-turn chat history.
+/// - Speaks answer via Native TTS.
+/// - Executes music actions (play/stop/resume).
+async fn execute_assistant_turn(
+    initial_prompt: Option<String>,
+    led_ref: Arc<LedController>,
+    stt_ref: Arc<SttService>,
+    ds_ref: Arc<DeepSeekService>,
+    player_ref: Arc<PlayerService>,
+    sc_ref: Arc<SoundCloudService>,
+    yt_ref: Arc<YtMusicService>,
+    tts_ref: Arc<TtsService>,
+    chat_ref: Arc<ChatService>,
+    ww_ref: Arc<WakeWordService>,
+) {
+    ww_ref.set_processing(true);
+
+    let recognized_text = match initial_prompt {
+        Some(cmd) if !cmd.trim().is_empty() => {
+            led_ref.set_rgb(220, 150, 0); // Amber: processing one-shot command
+            cmd
+        }
+        _ => {
+            // Standalone wake word or touch hold:
+            // Record & transcribe speech using dynamic VAD
+            match stt_ref.record_and_transcribe(&led_ref).await {
+                Ok(text) => text,
+                Err(e) => {
+                    warn!("STT recording/transcription failed: {}", e);
+                    led_ref.blink(255, 140, 0, 200);
+                    ww_ref.set_processing(false);
+                    return;
+                }
+            }
+        }
+    };
+
+    info!("Voice command recognized: '{}'", recognized_text);
+
+    // Multi-turn session & 1-hour rule context
+    let (session_id, history, _) = chat_ref.prepare_session_for_prompt(None).await;
+
+    // Send query to DeepSeek/LLM with history
+    match ds_ref.query_with_history(&recognized_text, &history).await {
+        Ok(resp) => {
+            info!("DeepSeek reply: '{}' (action: {})", resp.text, resp.action);
+
+            chat_ref
+                .record_turn(
+                    &session_id,
+                    &recognized_text,
+                    &resp.text,
+                    &resp.action,
+                    resp.color,
+                    &resp.song,
+                )
+                .await;
+
+            // Native Speech Synthesis (TTS) & Breathing Animation
+            if !resp.text.is_empty() {
+                let _ = tts_ref.speak(&resp.text, resp.color, &led_ref).await;
+            }
+
+            // Handle Music Actions via YouTube Music (100% exact match)
+            match resp.action.as_str() {
+                "play" => {
+                    let song = if resp.song.is_empty() {
+                        "Lofi chill beats"
+                    } else {
+                        &resp.song
+                    };
+                    player_ref.play_smart_or_query(&yt_ref, &sc_ref, song, &led_ref).await;
+                }
+                "stop" => player_ref.stop(&led_ref).await,
+                "resume" => player_ref.resume(&led_ref).await,
+                _ => {}
+            }
+        }
+        Err(e) => {
+            error!("DeepSeek query failed: {}", e);
+            led_ref.blink(255, 0, 0, 200);
+        }
+    }
+
+    ww_ref.set_processing(false);
 }

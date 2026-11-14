@@ -4,7 +4,7 @@ use crate::config::{
 use crate::hardware::{AudioHardware, LedController, NetworkHardware, StationButtonEvent};
 use crate::services::{
     ChatService, ChatSession, ChatSessionSummary, DeepSeekService, PlaybackState, PlayerService,
-    SoundCloudService, SttService, TtsService, VisualizerService, YtMusicService,
+    SoundCloudService, SttService, TtsService, VisualizerService, WakeWordService, YtMusicService,
 };
 use axum::{
     extract::{Path as AxumPath, Query, State},
@@ -96,6 +96,7 @@ pub struct AppState {
     pub logs: Arc<LogBuffer>,
     pub start_time: Instant,
     pub chat: Arc<ChatService>,
+    pub wakeword: Arc<WakeWordService>,
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -111,6 +112,11 @@ pub fn create_router(state: AppState) -> Router {
         // Status & Info
         .route("/api/status", get(get_status_handler))
         .route("/api/player/status", get(get_status_handler))
+        // Wake-Word & Voice Activation
+        .route(
+            "/api/wakeword",
+            get(get_wakeword_handler).post(post_wakeword_handler),
+        )
         // Volume
         .route("/api/volume", post(set_volume_handler))
         .route("/api/player/volume", post(set_volume_handler))
@@ -265,6 +271,7 @@ struct SystemStatusResponse {
     ram_used_mb: u64,
     ram_total_mb: u64,
     autoplay: bool,
+    wakeword_enabled: bool,
 }
 
 async fn get_status_handler(State(state): State<AppState>) -> impl IntoResponse {
@@ -289,6 +296,7 @@ async fn get_status_handler(State(state): State<AppState>) -> impl IntoResponse 
     let (ram_used_mb, ram_total_mb) = get_mem_stats();
     let uptime_secs = state.start_time.elapsed().as_secs();
     let autoplay = state.player.is_autoplay();
+    let wakeword_enabled = state.wakeword.is_enabled();
 
     Json(SystemStatusResponse {
         volume,
@@ -310,6 +318,7 @@ async fn get_status_handler(State(state): State<AppState>) -> impl IntoResponse 
         ram_used_mb,
         ram_total_mb,
         autoplay,
+        wakeword_enabled,
     })
 }
 
@@ -459,6 +468,74 @@ async fn set_autoplay_handler(
     Json(serde_json::json!({
         "success": true,
         "autoplay": new_val
+    }))
+}
+
+#[derive(Deserialize)]
+struct UpdateWakewordRequest {
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    phrase: Option<String>,
+}
+
+async fn get_wakeword_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let enabled = state.wakeword.is_enabled();
+    let phrase = state.wakeword.get_phrase().await;
+    Json(serde_json::json!({
+        "success": true,
+        "enabled": enabled,
+        "phrase": phrase
+    }))
+}
+
+async fn post_wakeword_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<UpdateWakewordRequest>,
+) -> impl IntoResponse {
+    if let Some(en) = payload.enabled {
+        state.wakeword.set_enabled(en);
+    }
+    if let Some(phrase) = payload.phrase {
+        if !phrase.trim().is_empty() {
+            state.wakeword.set_phrase(phrase.trim().to_lowercase()).await;
+        }
+    }
+
+    let enabled = state.wakeword.is_enabled();
+    let phrase = state.wakeword.get_phrase().await;
+
+    // Persist to config.json
+    {
+        let mut cfg = state.config.write().await;
+        cfg.audio.wakeword_enabled = enabled;
+        cfg.audio.wakeword_phrase = phrase.clone();
+        let save_path = if std::path::Path::new("/data").exists() {
+            "/data/config.json"
+        } else {
+            "config.json"
+        };
+        if let Ok(json_str) = serde_json::to_string_pretty(&*cfg) {
+            let _ = tokio::fs::write(save_path, json_str).await;
+        }
+    }
+
+    state
+        .logs
+        .push(
+            "INFO",
+            &format!(
+                "Web: Wake-Word «{}» {}",
+                phrase,
+                if enabled { "включен" } else { "отключен" }
+            ),
+        )
+        .await;
+
+    Json(serde_json::json!({
+        "success": true,
+        "enabled": enabled,
+        "phrase": phrase
     }))
 }
 
