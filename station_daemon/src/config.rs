@@ -264,6 +264,12 @@ pub struct AudioConfig {
     pub record_device: String,
     #[serde(default = "default_sample_rate")]
     pub sample_rate: u32,
+    #[serde(default = "default_true")]
+    pub autoplay: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_volume() -> u8 {
@@ -576,6 +582,7 @@ impl Default for AppConfig {
                 alsa_card: default_card(),
                 record_device: default_rec_device(),
                 sample_rate: default_sample_rate(),
+                autoplay: default_true(),
             },
             hardware: HardwareConfig {
                 input_event_device: default_input_device(),

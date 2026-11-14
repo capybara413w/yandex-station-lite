@@ -1,7 +1,7 @@
 use crate::config::AppConfig;
 use crate::hardware::LedController;
 use crate::services::soundcloud::SoundCloudService;
-use crate::services::ytmusic::YtMusicService;
+use crate::services::ytmusic::{YtMusicService, YtTrack};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -67,27 +67,161 @@ pub struct PlayerService {
     is_hls: Arc<AtomicBool>,
     generation: Arc<AtomicU64>,
     is_busy: Arc<AtomicBool>,
+    pub autoplay: Arc<AtomicBool>,
+    pub queue: Arc<RwLock<Vec<YtTrack>>>,
+    pub last_yt_id: Arc<RwLock<Option<String>>>,
+    pub autoplay_tx: tokio::sync::mpsc::Sender<()>,
 }
 
 impl PlayerService {
-    pub fn new(config: Arc<RwLock<AppConfig>>) -> Self {
+    pub fn new(config: Arc<RwLock<AppConfig>>) -> (Self, tokio::sync::mpsc::Receiver<()>) {
         let _ = fs::remove_file("/tmp/music_playing");
         let _ = fs::remove_file("/tmp/music_paused");
+        let (autoplay_tx, autoplay_rx) = tokio::sync::mpsc::channel(32);
 
-        Self {
-            config,
-            state: Arc::new(RwLock::new(PlaybackState::Stopped)),
-            current_track: Arc::new(RwLock::new("Ожидание команды...".to_string())),
-            current_artist: Arc::new(RwLock::new(String::new())),
-            current_artwork: Arc::new(RwLock::new(None)),
-            current_stream_url: Arc::new(RwLock::new(String::new())),
-            current_duration_secs: Arc::new(RwLock::new(0)),
-            base_offset_secs: Arc::new(RwLock::new(0)),
-            playback_start: Arc::new(RwLock::new(None)),
-            is_hls: Arc::new(AtomicBool::new(false)),
-            generation: Arc::new(AtomicU64::new(0)),
-            is_busy: Arc::new(AtomicBool::new(false)),
+        (
+            Self {
+                config,
+                state: Arc::new(RwLock::new(PlaybackState::Stopped)),
+                current_track: Arc::new(RwLock::new("Ожидание команды...".to_string())),
+                current_artist: Arc::new(RwLock::new(String::new())),
+                current_artwork: Arc::new(RwLock::new(None)),
+                current_stream_url: Arc::new(RwLock::new(String::new())),
+                current_duration_secs: Arc::new(RwLock::new(0)),
+                base_offset_secs: Arc::new(RwLock::new(0)),
+                playback_start: Arc::new(RwLock::new(None)),
+                is_hls: Arc::new(AtomicBool::new(false)),
+                generation: Arc::new(AtomicU64::new(0)),
+                is_busy: Arc::new(AtomicBool::new(false)),
+                autoplay: Arc::new(AtomicBool::new(true)),
+                queue: Arc::new(RwLock::new(Vec::new())),
+                last_yt_id: Arc::new(RwLock::new(None)),
+                autoplay_tx,
+            },
+            autoplay_rx,
+        )
+    }
+
+    pub fn is_autoplay(&self) -> bool {
+        self.autoplay.load(Ordering::Relaxed)
+    }
+
+    pub fn set_autoplay(&self, enabled: bool) {
+        self.autoplay.store(enabled, Ordering::Relaxed);
+    }
+
+    pub async fn get_queue(&self) -> Vec<YtTrack> {
+        self.queue.read().await.clone()
+    }
+
+    pub async fn set_queue(&self, tracks: Vec<YtTrack>) {
+        *self.queue.write().await = tracks;
+    }
+
+    pub async fn clear_queue(&self) {
+        self.queue.write().await.clear();
+    }
+
+    pub async fn get_last_yt_id(&self) -> Option<String> {
+        self.last_yt_id.read().await.clone()
+    }
+
+    pub fn start_autoplay_worker(
+        player: Arc<Self>,
+        ytmusic: Arc<YtMusicService>,
+        led: Arc<LedController>,
+        mut rx: tokio::sync::mpsc::Receiver<()>,
+    ) {
+        tokio::spawn(async move {
+            while rx.recv().await.is_some() {
+                if !player.is_autoplay() {
+                    continue;
+                }
+                // Pause 250ms for ALSA sound hardware to completely release hw:0,0
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+
+                if player.get_state().await != PlaybackState::Stopped {
+                    continue;
+                }
+
+                info!("⚡ Autoplay: track ended, picking next recommendation...");
+                let _ = player.play_next(&ytmusic, &led).await;
+            }
+        });
+    }
+
+    /// Plays next track from the autoplay queue or radio recommendations
+    pub async fn play_next(&self, ytmusic: &YtMusicService, led: &LedController) -> bool {
+        let next_track = {
+            let mut q = self.queue.write().await;
+            if !q.is_empty() {
+                Some(q.remove(0))
+            } else {
+                None
+            }
+        };
+
+        let track = if let Some(t) = next_track {
+            t
+        } else if let Some(last_id) = self.get_last_yt_id().await {
+            info!("Autoplay queue empty, fetching new recommendations for video {}", last_id);
+            if let Ok(more) = ytmusic.get_autoplay_tracks(&last_id).await {
+                let mut valid: Vec<_> = more.into_iter().filter(|x| x.id != last_id).collect();
+                if !valid.is_empty() {
+                    let first = valid.remove(0);
+                    let mut q = self.queue.write().await;
+                    *q = valid;
+                    first
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        };
+
+        info!("🎵 Autoplay advancing to: '{}' by '{}' ({})", track.title, track.artist, track.id);
+        if let Ok(info) = ytmusic.resolve_stream_info(&track.id).await {
+            let dur = info.duration_seconds.unwrap_or(track.duration_seconds).max(30);
+            let title = info.title.unwrap_or(track.title);
+            let artist = info.artist.unwrap_or(track.artist);
+            let artwork = info.artwork_url.or(track.artwork_url);
+
+            *self.last_yt_id.write().await = Some(track.id.clone());
+
+            // If queue now has < 3 tracks, prefetch more in background
+            let remaining = self.queue.read().await.len();
+            if remaining < 3 {
+                let yt_cl = ytmusic.clone();
+                let q_cl = self.queue.clone();
+                let vid = track.id.clone();
+                tokio::spawn(async move {
+                    if let Ok(recs) = yt_cl.get_autoplay_tracks(&vid).await {
+                        let mut q = q_cl.write().await;
+                        for r in recs {
+                            if r.id != vid && !q.iter().any(|x| x.id == r.id) {
+                                q.push(r);
+                            }
+                        }
+                    }
+                });
+            }
+
+            self.play_direct_stream(
+                &info.stream_url,
+                &title,
+                &artist,
+                artwork,
+                dur,
+                false,
+                0,
+                led,
+            ).await;
+            return true;
         }
+        false
     }
 
     pub async fn get_state(&self) -> PlaybackState {
@@ -272,6 +406,21 @@ impl PlayerService {
                     let title = info.title.unwrap_or_else(|| "YouTube Track".to_string());
                     let artist = info.artist.unwrap_or_else(|| "YouTube".to_string());
                     let dur = info.duration_seconds.unwrap_or(210);
+
+                    *self.last_yt_id.write().await = Some(vid.to_string());
+                    if self.is_autoplay() {
+                        let yt_cl = ytmusic.clone();
+                        let q_cl = self.queue.clone();
+                        let vid_str = vid.to_string();
+                        tokio::spawn(async move {
+                            if let Ok(recs) = yt_cl.get_autoplay_tracks(&vid_str).await {
+                                let filtered: Vec<_> = recs.into_iter().filter(|x| x.id != vid_str).collect();
+                                info!("⚡ Autoplay: preloaded {} next tracks for '{}'", filtered.len(), vid_str);
+                                *q_cl.write().await = filtered;
+                            }
+                        });
+                    }
+
                     self.play_direct_stream(&info.stream_url, &title, &artist, info.artwork_url, dur, false, 0, led).await;
                     return;
                 }
@@ -294,6 +443,21 @@ impl PlayerService {
                 info!("YouTube Music 100% match found for '{}': '{}' by '{}' ({})", search_target, t.title, t.artist, t.id);
                 if let Ok(stream_url) = ytmusic.resolve_stream_url(&t.id).await {
                     let dur = if t.duration_seconds > 0 { t.duration_seconds } else { 210 };
+
+                    *self.last_yt_id.write().await = Some(t.id.clone());
+                    if self.is_autoplay() {
+                        let yt_cl = ytmusic.clone();
+                        let q_cl = self.queue.clone();
+                        let vid = t.id.clone();
+                        tokio::spawn(async move {
+                            if let Ok(recs) = yt_cl.get_autoplay_tracks(&vid).await {
+                                let filtered: Vec<_> = recs.into_iter().filter(|x| x.id != vid).collect();
+                                info!("⚡ Autoplay: preloaded {} next tracks for '{}'", filtered.len(), vid);
+                                *q_cl.write().await = filtered;
+                            }
+                        });
+                    }
+
                     self.play_direct_stream(
                         &stream_url,
                         &t.title,
@@ -533,6 +697,9 @@ impl PlayerService {
             }
         };
 
+        let autoplay_tx = self.autoplay_tx.clone();
+        let autoplay_flag = self.autoplay.clone();
+
         tokio::task::spawn_blocking(move || {
             let spawn_start = Instant::now();
             let safe_url = url.replace('\'', "%27");
@@ -620,6 +787,9 @@ impl PlayerService {
                         "⏹ Track playback finished after {}s with exit status: {:?} (gen: {})",
                         total_secs, exit_status, current_gen
                     );
+                    if autoplay_flag.load(Ordering::Relaxed) {
+                        let _ = autoplay_tx.send(()).await;
+                    }
                 } else {
                     info!(
                         "Discarding playback finished event (current gen: {}, task gen: {})",

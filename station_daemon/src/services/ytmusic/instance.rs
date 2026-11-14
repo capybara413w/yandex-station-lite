@@ -12,8 +12,9 @@ use tokio::sync::RwLock;
 use tracing::debug;
 
 use super::json_extractor::{
-    extract_playlist_info, from_json, get_continuation, get_playlist, get_playlist_search,
-    get_video, get_video_from_album, Continuation, YoutubeMusicPlaylistRef, YoutubeMusicVideoRef,
+    extract_playlist_info, from_json, get_continuation, get_playlist, get_playlist_panel_video,
+    get_playlist_search, get_video, get_video_from_album, Continuation, YoutubeMusicPlaylistRef,
+    YoutubeMusicVideoRef,
 };
 use super::string_utils::StringUtils;
 
@@ -60,7 +61,14 @@ impl Endpoint {
         match self {
             Endpoint::MusicLikedPlaylists => "FEmusic_liked_playlists".to_owned(),
             Endpoint::MusicLibraryLanding => "FEmusic_library_landing".to_owned(),
-            Endpoint::Playlist(id) => id.to_owned(),
+            Endpoint::Playlist(id) => {
+                let s = id.trim();
+                if s.starts_with("VL") || s.starts_with("FE") || s.starts_with("MPRE") {
+                    s.to_owned()
+                } else {
+                    format!("VL{}", s)
+                }
+            }
             Endpoint::Search(query) => query.to_owned(),
             Endpoint::MusicHome => "FEmusic_home".to_owned(),
         }
@@ -207,6 +215,8 @@ impl YoutubeMusicInstance {
         );
         headers.insert("Content-Type", HeaderValue::from_static("application/json"));
         headers.insert("X-Origin", HeaderValue::from_static(YTM_DOMAIN));
+        headers.insert("Origin", HeaderValue::from_static(YTM_DOMAIN));
+        headers.insert("X-Goog-AuthUser", HeaderValue::from_static("0"));
 
         if !self.cookies.is_empty() {
             if let Ok(v) = HeaderValue::from_str(&self.cookies) {
@@ -442,6 +452,55 @@ impl YoutubeMusicInstance {
         }
 
         Ok(SearchResults { videos, playlists })
+    }
+
+    /// Fetches automatic next recommendations (autoplay / automix queue) for a given track
+    pub async fn get_autoplay_tracks(&self, video_id: &str) -> Result<Vec<YoutubeMusicVideoRef>, String> {
+        let vid = video_id.trim();
+        if vid.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let url = format!(
+            "https://music.youtube.com/youtubei/v1/next?key={}&prettyPrint=false",
+            self.innertube_api_key
+        );
+
+        let body = serde_json::json!({
+            "context": {
+                "client": {
+                    "clientName": "WEB_REMIX",
+                    "clientVersion": self.client_version,
+                    "hl": "ru",
+                    "gl": "RU"
+                }
+            },
+            "videoId": vid,
+            "isAutoplay": true,
+            "enablePersistentPlaylistPanel": true
+        });
+
+        let res = self.client
+            .post(&url)
+            .headers(self.build_headers())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Next request failed: {}", e))?;
+
+        if !res.status().is_success() {
+            let st = res.status();
+            let txt = res.text().await.unwrap_or_default();
+            return Err(format!("Next HTTP {}: {}", st, txt));
+        }
+
+        let json: Value = res.json().await.map_err(|e| format!("JSON parse error: {}", e))?;
+        let videos = from_json(&json, get_playlist_panel_video);
+        if videos.is_empty() {
+            let fallback_videos = from_json(&json, get_video);
+            return Ok(fallback_videos);
+        }
+        Ok(videos)
     }
 
     /// Resolves direct audio stream URL from YouTube Innertube player API (Ad-Free)
@@ -685,6 +744,13 @@ fn parse_playlist(playlist_json: &Value) -> Vec<YoutubeMusicVideoRef> {
             }
         }
         videos.push(video);
+    }
+    if videos.is_empty() {
+        for video in from_json(playlist_json, get_playlist_panel_video) {
+            if !videos.iter().any(|x| x.video_id == video.video_id) {
+                videos.push(video);
+            }
+        }
     }
     videos
 }

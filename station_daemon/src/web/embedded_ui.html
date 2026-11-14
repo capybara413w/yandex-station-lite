@@ -1264,9 +1264,16 @@
                     <button type="button" class="m3-btn m3-btn-tonal" onclick="seekOffset(15)" title="Вперед 15 сек">
                       <span class="material-symbols-rounded">forward_10</span>
                     </button>
+                    <button type="button" class="m3-btn m3-btn-tonal" onclick="playerAction('next')" title="Следующий трек (автоподбор)">
+                      <span class="material-symbols-rounded">skip_next</span>
+                    </button>
                     <button type="button" class="m3-btn m3-btn-outlined" onclick="playerAction('stop')" title="Остановить">
                       <span class="material-symbols-rounded">stop</span>
                       <span>Стоп</span>
+                    </button>
+                    <button type="button" id="autoplayToggleBtn" class="m3-btn m3-btn-tonal" onclick="toggleAutoplay()" title="Автоподбор следующего трека (YouTube Music Radio)" style="display: flex; align-items: center; gap: 6px; border: 1px solid rgba(255,255,255,0.15);">
+                      <span class="material-symbols-rounded" style="font-size: 18px;">autorenew</span>
+                      <span style="font-size: 0.82rem;">Автоподбор</span>
                     </button>
                   </div>
 
@@ -2650,6 +2657,9 @@
             document.getElementById('musicVolBadge').innerText = currentVolume + '% ГРОМКОСТЬ';
             document.getElementById('musicVolSlider').value = currentVolume;
           }
+          if (d.autoplay !== undefined) {
+            updateAutoplayUI(d.autoplay);
+          }
           if (d.state) {
             isPlaying = d.state === 'playing';
             document.getElementById('playerStateBadge').innerText = d.state.toUpperCase();
@@ -2753,6 +2763,34 @@
           body: JSON.stringify({ volume: Math.round(currentVolume / 10), volume_percent: currentVolume })
         });
       } catch {}
+    }
+
+    async function toggleAutoplay() {
+      try {
+        const res = await fetch('/api/player/autoplay', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const data = await res.json();
+        updateAutoplayUI(data.autoplay);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function updateAutoplayUI(enabled) {
+      const btn = document.getElementById('autoplayToggleBtn');
+      if (!btn) return;
+      if (enabled) {
+        btn.style.borderColor = '#00e5ff';
+        btn.style.color = '#00e5ff';
+        btn.style.background = 'rgba(0, 229, 255, 0.16)';
+      } else {
+        btn.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+        btn.style.color = '#a49ea8';
+        btn.style.background = 'transparent';
+      }
     }
 
     async function togglePlayPause() {
@@ -3932,10 +3970,24 @@
             </div>
           `).join('');
         } else {
-          container.innerHTML = '<div style="text-align: center; padding: 32px; color: #8e8893;">Понравившиеся треки не найдены. Подключите Cookie аккаунта.</div>';
+          const errMsg = d.error || 'Для отображения понравившихся треков требуется активная сессия YouTube Music. Если вы подключали Cookie ранее, срок действия авторизации мог истечь.';
+          container.innerHTML = `
+            <div style="text-align: center; padding: 32px 16px; background: #1c1922; border-radius: 16px; border: 1px dashed rgba(255, 180, 194, 0.25);">
+              <span class="material-symbols-rounded" style="font-size: 44px; color: #ffb4c2; margin-bottom: 8px;">favorite_border</span>
+              <div style="font-weight: 700; font-size: 1rem; color: #fff; margin-bottom: 6px;">Понравившиеся треки не найдены</div>
+              <div style="font-size: 0.82rem; color: #9d96a2; max-width: 420px; margin: 0 auto 16px; line-height: 1.4;">${escapeHtml(errMsg)}</div>
+              <button type="button" class="m3-btn m3-btn-primary" onclick="openYtCookieModal()">
+                <span class="material-symbols-rounded" style="font-size: 18px;">key</span>
+                <span>Обновить Cookie YouTube Music</span>
+              </button>
+            </div>`;
         }
       } catch (e) {
-        container.innerHTML = '<div style="color: #ff5252; padding: 16px;">Ошибка загрузки понравившихся треков.</div>';
+        container.innerHTML = `
+          <div style="text-align: center; padding: 24px; color: #ff5252;">
+            <div>Ошибка загрузки понравившихся треков: ${escapeHtml(e.message || String(e))}</div>
+            <button type="button" class="m3-btn m3-btn-tonal" style="margin-top: 12px;" onclick="openYtCookieModal()">Проверить Cookie</button>
+          </div>`;
       }
     }
 
@@ -3959,10 +4011,21 @@
             </div>
           `).join('');
         } else {
-          container.innerHTML = '<div style="text-align: center; padding: 32px; color: #8e8893;">Плейлисты не найдены. Подключите Cookie аккаунта.</div>';
+          const errMsg = d.error || 'Плейлисты медиатеки не найдены или Cookie устарели.';
+          container.innerHTML = `
+            <div style="grid-column: 1 / -1; text-align: center; padding: 32px 16px; background: #1c1922; border-radius: 16px; border: 1px dashed rgba(255, 180, 194, 0.25);">
+              <span class="material-symbols-rounded" style="font-size: 44px; color: #ffb4c2; margin-bottom: 8px;">library_music</span>
+              <div style="font-weight: 700; font-size: 1rem; color: #fff; margin-bottom: 6px;">Медиатека плейлистов недоступна</div>
+              <div style="font-size: 0.82rem; color: #9d96a2; max-width: 420px; margin: 0 auto 16px; line-height: 1.4;">${escapeHtml(errMsg)}</div>
+              <button type="button" class="m3-btn m3-btn-primary" onclick="openYtCookieModal()">
+                <span class="material-symbols-rounded" style="font-size: 18px;">key</span>
+                <span>Обновить Cookie YouTube Music</span>
+              </button>
+            </div>`;
         }
       } catch (e) {
-        container.innerHTML = '<div style="color: #ff5252; padding: 16px;">Ошибка загрузки плейлистов.</div>';
+        container.innerHTML = `
+          <div style="color: #ff5252; padding: 16px;">Ошибка загрузки плейлистов: ${escapeHtml(e.message || String(e))}</div>`;
       }
     }
 

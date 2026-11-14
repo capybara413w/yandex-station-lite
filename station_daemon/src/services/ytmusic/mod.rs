@@ -51,6 +51,7 @@ pub struct YtAccountStatus {
 
 /// YTerMusic-based YouTube Music Service for station_daemon
 /// Original author: ccgauche (https://github.com/ccgauche/ytermusic)
+#[derive(Clone)]
 pub struct YtMusicService {
     config: Arc<RwLock<AppConfig>>,
 }
@@ -176,24 +177,34 @@ impl YtMusicService {
         Ok(sections)
     }
 
-    /// Fetches user Liked Songs ("LM" playlist in YouTube Music)
+    /// Fetches user Liked Songs ("VLLM" playlist in YouTube Music)
     pub async fn get_liked_songs(&self, limit: usize) -> Result<Vec<YtTrack>, String> {
         let instance = self.get_instance().await?;
         if !instance.is_authenticated() {
             return Err("Для просмотра понравившихся треков требуется авторизация YouTube Music (Cookie)".to_string());
         }
 
-        let continuations = (limit / 25).clamp(1, 4);
-        // "LM" is the universal YouTube Music liked music playlist browseId
-        let videos = match instance.get_playlist_raw("LM", continuations).await {
-            Ok(v) => v,
-            Err(_) => {
-                // Fallback to liked playlists landing
-                let library = instance.get_library(&Endpoint::MusicLikedPlaylists, 1).await?;
-                if let Some(first) = library.first() {
-                    instance.get_playlist_raw(&first.browse_id, continuations).await?
-                } else {
-                    Vec::new()
+        let continuations = (limit / 25).clamp(1, 6);
+        // "VLLM" is the universal YouTube Music liked music playlist browseId ("VL" + "LM")
+        let videos = match instance.get_playlist_raw("VLLM", continuations).await {
+            Ok(v) if !v.is_empty() => v,
+            Ok(_) | Err(_) => {
+                // Fallback 1: Try with "LM" (instance will ensure VL prefix)
+                match instance.get_playlist_raw("LM", continuations).await {
+                    Ok(v) if !v.is_empty() => v,
+                    _ => {
+                        // Fallback 2: Check liked playlists landing
+                        match instance.get_library(&Endpoint::MusicLikedPlaylists, 2).await {
+                            Ok(library) => {
+                                if let Some(first) = library.first() {
+                                    instance.get_playlist_raw(&first.browse_id, continuations).await.unwrap_or_default()
+                                } else {
+                                    Vec::new()
+                                }
+                            }
+                            Err(_) => Vec::new(),
+                        }
+                    }
                 }
             }
         };
@@ -201,6 +212,10 @@ impl YtMusicService {
         let mut tracks: Vec<YtTrack> = videos.into_iter().map(Self::video_to_track).collect();
         if tracks.len() > limit {
             tracks.truncate(limit);
+        }
+
+        if tracks.is_empty() {
+            return Err("Список понравившихся треков пуст или срок действия Cookie YouTube Music истек. Обновите Cookie в веб-интерфейсе.".to_string());
         }
 
         Ok(tracks)
@@ -239,6 +254,13 @@ impl YtMusicService {
     pub async fn resolve_stream_url(&self, video_id: &str) -> Result<String, String> {
         let instance = self.get_instance().await?;
         instance.resolve_stream_url(video_id).await
+    }
+
+    /// Fetches automatic recommendations / autoplay queue for a given track
+    pub async fn get_autoplay_tracks(&self, video_id: &str) -> Result<Vec<YtTrack>, String> {
+        let instance = self.get_instance().await?;
+        let videos = instance.get_autoplay_tracks(video_id).await?;
+        Ok(videos.into_iter().map(Self::video_to_track).collect())
     }
 
     fn video_to_track(v: YoutubeMusicVideoRef) -> YtTrack {

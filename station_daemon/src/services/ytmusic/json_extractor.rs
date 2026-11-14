@@ -257,6 +257,40 @@ pub(crate) fn get_video(value: &Value) -> Option<YoutubeMusicVideoRef> {
     })
 }
 
+pub(crate) fn get_playlist_panel_video(value: &Value) -> Option<YoutubeMusicVideoRef> {
+    let renderer = value.get("playlistPanelVideoRenderer")?;
+    let video_id = renderer.get("videoId")?.as_str()?.to_string();
+    let title = renderer.pointer("/title/runs/0/text")
+        .or_else(|| renderer.pointer("/title/simpleText"))
+        .and_then(|v| v.as_str())?
+        .to_string();
+    let author = renderer.pointer("/longBylineText/runs/0/text")
+        .or_else(|| renderer.pointer("/shortBylineText/runs/0/text"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("YouTube Music")
+        .to_string();
+    let duration = renderer.pointer("/lengthText/runs/0/text")
+        .or_else(|| renderer.pointer("/lengthText/simpleText"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let artwork_url = renderer.pointer("/thumbnail/thumbnails")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| arr.last())
+        .and_then(|t| t.get("url"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Some(YoutubeMusicVideoRef {
+        video_id,
+        title,
+        author,
+        album: String::new(),
+        duration,
+        artwork_url,
+    })
+}
+
 fn extract_column_runs_joined(col: &Value) -> Option<String> {
     let runs = col
         .pointer("/musicResponsiveListItemFlexColumnRenderer/text/runs")

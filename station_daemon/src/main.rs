@@ -97,7 +97,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         initial_config.stt.clone(),
         &initial_config.proxy,
     ));
-    let player = Arc::new(PlayerService::new(config.clone()));
+    let (player_instance, autoplay_rx) = PlayerService::new(config.clone());
+    let player = Arc::new(player_instance);
+    PlayerService::start_autoplay_worker(player.clone(), ytmusic.clone(), led.clone(), autoplay_rx);
     let tts = Arc::new(TtsService::new(config.clone(), &initial_config.proxy));
     let visualizer = Arc::new(VisualizerService::new(&initial_config.hardware.led_sysfs_base));
     visualizer.clone().start(tts.clone());

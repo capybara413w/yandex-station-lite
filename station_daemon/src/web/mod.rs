@@ -23,7 +23,7 @@ use std::time::Instant;
 use tokio::sync::{mpsc, RwLock};
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 const EMBEDDED_HTML: &str = include_str!("embedded_ui.html");
 
@@ -118,6 +118,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/player/action", post(player_action_handler))
         .route("/api/player/play_song", post(play_song_handler))
         .route("/api/player/seek", post(seek_handler))
+        .route("/api/player/autoplay", get(get_autoplay_handler).post(set_autoplay_handler))
+        .route("/api/player/next", post(player_next_handler))
+        .route("/api/player/queue", get(player_queue_handler))
         // Music integration (YouTube Music, SoundCloud, Radio)
         .route("/api/music/search", get(music_search_handler))
         .route("/api/soundcloud/search", get(music_search_handler))
@@ -129,6 +132,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/ytmusic/liked", get(ytmusic_liked_handler))
         .route("/api/ytmusic/playlists", get(ytmusic_playlists_handler))
         .route("/api/ytmusic/playlist/:id", get(ytmusic_playlist_tracks_handler))
+        .route("/api/ytmusic/autoplay/:id", get(ytmusic_autoplay_handler))
         .route("/api/ytmusic/search", get(ytmusic_search_handler))
         .route("/api/ytmusic/play", post(ytmusic_play_handler))
         // Visualizer (3-Band Reactive Lightshow: Low, Mid, High)
@@ -260,6 +264,7 @@ struct SystemStatusResponse {
     uptime_secs: u64,
     ram_used_mb: u64,
     ram_total_mb: u64,
+    autoplay: bool,
 }
 
 async fn get_status_handler(State(state): State<AppState>) -> impl IntoResponse {
@@ -283,6 +288,7 @@ async fn get_status_handler(State(state): State<AppState>) -> impl IntoResponse 
     let station_ip = get_local_ip();
     let (ram_used_mb, ram_total_mb) = get_mem_stats();
     let uptime_secs = state.start_time.elapsed().as_secs();
+    let autoplay = state.player.is_autoplay();
 
     Json(SystemStatusResponse {
         volume,
@@ -303,6 +309,7 @@ async fn get_status_handler(State(state): State<AppState>) -> impl IntoResponse 
         uptime_secs,
         ram_used_mb,
         ram_total_mb,
+        autoplay,
     })
 }
 
@@ -379,6 +386,10 @@ async fn player_action_handler(
             state.player.play_soundcloud_or_query(&state.soundcloud, &track, &state.led).await;
             state.logs.push("INFO", &format!("Web: SoundCloud/плеер запрос '{}'", track)).await;
         }
+        "next" | "skip" => {
+            state.player.play_next(&state.ytmusic, &state.led).await;
+            state.logs.push("INFO", "Web: переход к следующему треку (автоподбор)").await;
+        }
         _ => {}
     }
 
@@ -394,6 +405,75 @@ async fn player_action_handler(
         "state": st,
         "position_seconds": pos,
         "duration_seconds": dur
+    }))
+}
+
+#[derive(Deserialize, Default)]
+struct AutoplayToggleRequest {
+    #[serde(default)]
+    autoplay: Option<bool>,
+}
+
+async fn get_autoplay_handler(State(state): State<AppState>) -> impl IntoResponse {
+    Json(serde_json::json!({
+        "success": true,
+        "autoplay": state.player.is_autoplay()
+    }))
+}
+
+async fn set_autoplay_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<AutoplayToggleRequest>,
+) -> impl IntoResponse {
+    let new_val = match payload.autoplay {
+        Some(v) => v,
+        None => !state.player.is_autoplay(),
+    };
+    state.player.set_autoplay(new_val);
+
+    // Save to persistent config
+    {
+        let mut cfg = state.config.write().await;
+        cfg.audio.autoplay = new_val;
+        let save_path = if std::path::Path::new("/data").exists() {
+            "/data/config.json"
+        } else {
+            "config.json"
+        };
+        if let Ok(json_str) = serde_json::to_string_pretty(&*cfg) {
+            let _ = tokio::fs::write(save_path, json_str).await;
+        }
+    }
+
+    state
+        .logs
+        .push(
+            "INFO",
+            &format!(
+                "Web: автоподбор треков {}",
+                if new_val { "включен" } else { "отключен" }
+            ),
+        )
+        .await;
+
+    Json(serde_json::json!({
+        "success": true,
+        "autoplay": new_val
+    }))
+}
+
+async fn player_next_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let played = state.player.play_next(&state.ytmusic, &state.led).await;
+    Json(serde_json::json!({
+        "success": played
+    }))
+}
+
+async fn player_queue_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let queue = state.player.get_queue().await;
+    Json(serde_json::json!({
+        "success": true,
+        "queue": queue
     }))
 }
 
@@ -934,6 +1014,24 @@ async fn ytmusic_liked_handler(
     }
 }
 
+async fn ytmusic_autoplay_handler(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> impl IntoResponse {
+    match state.ytmusic.get_autoplay_tracks(&id).await {
+        Ok(tracks) => (StatusCode::OK, Json(serde_json::json!({
+            "success": true,
+            "video_id": id,
+            "tracks": tracks,
+        }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+            "success": false,
+            "error": e,
+            "tracks": [],
+        }))).into_response(),
+    }
+}
+
 async fn ytmusic_playlists_handler(State(state): State<AppState>) -> impl IntoResponse {
     match state.ytmusic.get_library_playlists().await {
         Ok(playlists) => (StatusCode::OK, Json(serde_json::json!({
@@ -1030,6 +1128,20 @@ async fn ytmusic_play_handler(
                 0,
                 &state.led,
             ).await;
+
+            *state.player.last_yt_id.write().await = Some(vid.to_string());
+            if state.player.is_autoplay() {
+                let yt_cl = state.ytmusic.clone();
+                let q_cl = state.player.queue.clone();
+                let vid_str = vid.to_string();
+                tokio::spawn(async move {
+                    if let Ok(recs) = yt_cl.get_autoplay_tracks(&vid_str).await {
+                        let filtered: Vec<_> = recs.into_iter().filter(|x| x.id != vid_str).collect();
+                        info!("⚡ Autoplay: preloaded {} next tracks for '{}'", filtered.len(), vid_str);
+                        *q_cl.write().await = filtered;
+                    }
+                });
+            }
 
             state.logs.push("INFO", &format!("YouTube Music: запуск '{}' - '{}' ({})", title, artist, vid)).await;
 
