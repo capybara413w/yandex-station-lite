@@ -266,11 +266,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Helper: Converts STT error string into a clear, understandable Russian message and LED color
+fn humanize_stt_error(e: &str) -> (&'static str, [u8; 3]) {
+    let lower = e.to_lowercase();
+    if lower.contains("таймаут") || lower.contains("речь не обнаружена") || lower.contains("timeout") || lower.contains("no speech") {
+        ("Я вас не услышала. Пожалуйста, повторите.", [255, 140, 0])
+    } else if lower.contains("записано 0") || lower.contains("empty") || lower.contains("0 байт") {
+        ("Не удалось записать звук с микрофона.", [255, 100, 0])
+    } else if lower.contains("busy") || lower.contains("занято") {
+        ("Микрофон сейчас занят другой задачей.", [255, 100, 0])
+    } else if lower.contains("401") || lower.contains("403") || lower.contains("unauthorized") || lower.contains("forbidden") || lower.contains("api key") {
+        ("Ошибка распознавания речи: неверный API-ключ. Проверьте настройки в веб-панели.", [255, 0, 0])
+    } else if lower.contains("429") || lower.contains("quota") || lower.contains("rate limit") || lower.contains("credit") || lower.contains("insufficient") {
+        ("Превышен лимит распознавания речи или закончился баланс.", [255, 0, 0])
+    } else if lower.contains("connect") || lower.contains("network") || lower.contains("dns") || lower.contains("proxy") || lower.contains("сеть") || lower.contains("timed out") {
+        ("Не удалось связаться с сервисом распознавания речи. Проверьте интернет.", [255, 50, 50])
+    } else {
+        ("Не удалось распознать речь. Попробуйте ещё раз.", [255, 50, 50])
+    }
+}
+
+/// Helper: Converts LLM / DeepSeek error string into a clear, understandable Russian message and LED color
+fn humanize_llm_error(e: &str) -> (&'static str, [u8; 3]) {
+    let lower = e.to_lowercase();
+    if lower.contains("401") || lower.contains("unauthorized") || lower.contains("invalid api key") || lower.contains("bearer token") || lower.contains("api key is empty") {
+        ("Ошибка авторизации нейросети: неверный API-ключ. Проверьте ключ в настройках веб-панели.", [255, 0, 0])
+    } else if lower.contains("402") || lower.contains("payment") || lower.contains("insufficient") || lower.contains("credit") || lower.contains("balance") {
+        ("На балансе нейросети закончились средства. Пополните счёт в вашем аккаунте.", [255, 0, 0])
+    } else if lower.contains("429") || lower.contains("rate limit") || lower.contains("too many requests") || lower.contains("quota") {
+        ("Превышен лимит запросов к нейросети. Пожалуйста, подождите минуту и повторите.", [255, 80, 0])
+    } else if lower.contains("500") || lower.contains("502") || lower.contains("503") || lower.contains("504") || lower.contains("bad gateway") || lower.contains("service unavailable") {
+        ("Сервер нейросети временно перегружен или недоступен. Попробуйте чуть позже.", [255, 50, 50])
+    } else if lower.contains("timed out") || lower.contains("timeout") || lower.contains("таймаут") {
+        ("Время ожидания ответа от нейросети истекло. Повторите запрос.", [255, 50, 50])
+    } else if lower.contains("connect") || lower.contains("network") || lower.contains("dns") || lower.contains("proxy") || lower.contains("connection refused") {
+        ("Не удалось связаться с нейросетью. Проверьте подключение к интернету или прокси.", [255, 50, 50])
+    } else {
+        ("Произошла ошибка при обращении к нейросети. Попробуйте позже.", [255, 0, 0])
+    }
+}
+
 /// Executes a complete Assistant Turn:
 /// - If `initial_prompt` is `Some(cmd)`, uses the one-shot voice command directly (skips recording).
 /// - If `initial_prompt` is `None` (CenterHold or standalone Wake-Word), records speech using real-time VAD.
 /// - Queries LLM with multi-turn chat history.
 /// - Speaks answer via Native TTS.
+/// - Clearly informs user via speech and LED if any error occurs at any stage.
 /// - Executes music actions (play/stop/resume).
 async fn execute_assistant_turn(
     initial_prompt: Option<String>,
@@ -295,10 +336,23 @@ async fn execute_assistant_turn(
             // Standalone wake word or touch hold:
             // Record & transcribe speech using dynamic VAD
             match stt_ref.record_and_transcribe(&led_ref).await {
-                Ok(text) => text,
+                Ok(text) => {
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        warn!("STT returned empty text");
+                        let err_msg = "Не удалось разобрать речь. Повторите, пожалуйста.";
+                        led_ref.blink(255, 140, 0, 200);
+                        let _ = tts_ref.speak(err_msg, [255, 140, 0], &led_ref).await;
+                        ww_ref.set_processing(false);
+                        return;
+                    }
+                    text
+                }
                 Err(e) => {
                     warn!("STT recording/transcription failed: {}", e);
-                    led_ref.blink(255, 140, 0, 200);
+                    let (err_msg, color) = humanize_stt_error(&e);
+                    led_ref.blink(color[0], color[1], color[2], 200);
+                    let _ = tts_ref.speak(err_msg, color, &led_ref).await;
                     ww_ref.set_processing(false);
                     return;
                 }
@@ -329,7 +383,13 @@ async fn execute_assistant_turn(
 
             // Native Speech Synthesis (TTS) & Breathing Animation
             if !resp.text.is_empty() {
-                let _ = tts_ref.speak(&resp.text, resp.color, &led_ref).await;
+                if let Err(e) = tts_ref.speak(&resp.text, resp.color, &led_ref).await {
+                    error!("TTS playback failed: {}", e);
+                    for _ in 0..3 {
+                        led_ref.blink(255, 0, 0, 150);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    }
+                }
             }
 
             // Handle Music Actions via YouTube Music (100% exact match)
@@ -349,7 +409,19 @@ async fn execute_assistant_turn(
         }
         Err(e) => {
             error!("DeepSeek query failed: {}", e);
-            led_ref.blink(255, 0, 0, 200);
+            let (err_msg, color) = humanize_llm_error(&e);
+            chat_ref
+                .record_turn(
+                    &session_id,
+                    &recognized_text,
+                    &format!("⚠️ {}", err_msg),
+                    "error",
+                    color,
+                    "",
+                )
+                .await;
+            led_ref.blink(color[0], color[1], color[2], 200);
+            let _ = tts_ref.speak(err_msg, color, &led_ref).await;
         }
     }
 

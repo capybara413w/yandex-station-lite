@@ -98,12 +98,12 @@ impl SttService {
             let mut noise_samples_count: usize = 0;
             let max_total_chunks = (max_secs * 20) as usize; // 20 chunks per second
 
-            // Silence duration after speech to consider sentence finished: ~900ms = 18 chunks
-            let max_silence_chunks = 18;
-            // Minimum speech duration before silence cutoff can terminate: ~2.2 seconds (44 chunks)
-            let min_speech_chunks = 44;
-            // Timeout if user never starts speaking: 6.0s = 120 chunks
-            let max_idle_chunks = 120;
+            // Silence duration after speech to consider sentence finished: ~800ms = 16 chunks
+            let max_silence_chunks = 16;
+            // Minimum speech duration before silence cutoff can terminate: ~800ms = 16 chunks
+            let min_speech_chunks = 16;
+            // Timeout if user never starts speaking: 5.0s = 100 chunks
+            let max_idle_chunks = 100;
 
             loop {
                 if is_hw_pdm {

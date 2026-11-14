@@ -4,21 +4,17 @@ use crate::services::player::PlayerService;
 use crate::services::stt::{pcm_to_wav, SttService};
 use crate::services::tts::TtsService;
 use std::collections::VecDeque;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Extracts wake-word trigger and optional one-shot command from transcribed text.
-///
-/// Returns:
-/// - `None`: No wake-word detected.
-/// - `Some(None)`: Wake-word detected alone without command (e.g. "Алиса", "Алиса?").
-/// - `Some(Some(cmd))`: Wake-word detected with a one-shot command (e.g. "Алиса, включи рок" -> `Some("включи рок")`).
 pub fn extract_wakeword(text: &str, target_phrase: &str) -> Option<Option<String>> {
     let lower = text.to_lowercase();
     let cleaned: String = lower
@@ -30,7 +26,7 @@ pub fn extract_wakeword(text: &str, target_phrase: &str) -> Option<Option<String
         return None;
     }
 
-    let default_aliases = ["алиса", "алис", "алисочка", "alisa", "alice"];
+    let default_aliases = ["алиса", "алис", "алисочка", "alisa", "alice", "яндекс", "yandex"];
     let target = target_phrase.trim().to_lowercase();
 
     let mut found_idx = None;
@@ -176,14 +172,13 @@ impl WakeWordService {
     }
 
     /// Starts the continuous background listener for the "Алиса" wake-word.
-    /// Runs in a blocking worker thread, tracking RMS energy and triggering on speech.
+    /// Uses native on-device Yandex Neural Spotter (`/data/yandex_spotter`) when available,
+    /// with automatic fallback to cloud VAD if uninstalled.
     pub fn start_worker(
         self: Arc<Self>,
         trigger_tx: mpsc::Sender<Option<String>>,
     ) {
         tokio::task::spawn_blocking(move || {
-            use std::io::Read;
-
             let arecord_bin = if Path::new("/opt/bin/arecord").exists() {
                 "/opt/bin/arecord"
             } else if Path::new("/usr/bin/arecord").exists() {
@@ -193,7 +188,7 @@ impl WakeWordService {
             };
 
             let rate_str = self.sample_rate.to_string();
-            // 50ms chunk at 16000Hz mono 16-bit = 1600 bytes
+            // 50ms chunk at 16000Hz mono 16-bit = 800 samples = 1600 bytes
             const CHUNK_SIZE: usize = 1600;
             let mut chunk = vec![0u8; CHUNK_SIZE];
 
@@ -222,7 +217,7 @@ impl WakeWordService {
                     || self.tts.is_speaking()
                     || Path::new("/tmp/listen.lock").exists()
                 {
-                    std::thread::sleep(Duration::from_millis(200));
+                    std::thread::sleep(Duration::from_millis(150));
                     continue;
                 }
 
@@ -230,7 +225,7 @@ impl WakeWordService {
                 let channels_arg = if is_hw_pdm { "8" } else { "1" };
 
                 // Spawn arecord process for continuous background microphone capture
-                let mut child = match Command::new(arecord_bin)
+                let mut arecord_child = match Command::new(arecord_bin)
                     .args([
                         "-D", &self.record_device,
                         "-f", "S16_LE",
@@ -239,8 +234,8 @@ impl WakeWordService {
                         "-t", "raw",
                         "-q",
                     ])
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
                     .spawn()
                 {
                     Ok(c) => c,
@@ -251,27 +246,176 @@ impl WakeWordService {
                     }
                 };
 
-                let mut stdout = match child.stdout.take() {
+                let mut arecord_stdout = match arecord_child.stdout.take() {
                     Some(s) => s,
                     None => {
-                        let _ = child.kill();
-                        let _ = child.wait();
+                        let _ = arecord_child.kill();
+                        let _ = arecord_child.wait();
                         std::thread::sleep(Duration::from_secs(1));
                         continue;
                     }
                 };
 
-                // 8-channel raw buffer for 800 frames = 800 * 8 * 2 = 12800 bytes
+                let yandex_spotter_path = if Path::new("/data/yandex_spotter").exists() {
+                    Some("/data/yandex_spotter")
+                } else if Path::new("/bkupgrade/data/yandex_spotter").exists() {
+                    Some("/bkupgrade/data/yandex_spotter")
+                } else {
+                    None
+                };
+
+                // PATH 1: NATIVE YANDEX ON-DEVICE SPOTTER (Instant, 0 latency, 0 network, accurate)
+                if let Some(spotter_bin) = yandex_spotter_path {
+                    let mut spotter_child = match Command::new(spotter_bin)
+                        .env("LD_LIBRARY_PATH", "/system/vendor/quasar/libs")
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::null())
+                        .spawn()
+                    {
+                        Ok(c) => c,
+                        Err(e) => {
+                            warn!("Failed to spawn native yandex_spotter: {}. Falling back...", e);
+                            let _ = arecord_child.kill();
+                            let _ = arecord_child.wait();
+                            std::thread::sleep(Duration::from_secs(1));
+                            continue;
+                        }
+                    };
+
+                    let mut spotter_stdin = match spotter_child.stdin.take() {
+                        Some(si) => si,
+                        None => {
+                            let _ = spotter_child.kill();
+                            let _ = spotter_child.wait();
+                            let _ = arecord_child.kill();
+                            let _ = arecord_child.wait();
+                            continue;
+                        }
+                    };
+
+                    let spotter_stdout = match spotter_child.stdout.take() {
+                        Some(so) => so,
+                        None => {
+                            let _ = spotter_child.kill();
+                            let _ = spotter_child.wait();
+                            let _ = arecord_child.kill();
+                            let _ = arecord_child.wait();
+                            continue;
+                        }
+                    };
+
+                    let detected_flag = Arc::new(AtomicBool::new(false));
+                    let detected_flag_clone = detected_flag.clone();
+
+                    // Reader thread watching spotter output lines: "WAKEWORD:алиса"
+                    let reader_thread = std::thread::spawn(move || {
+                        let reader = BufReader::new(spotter_stdout);
+                        for line_res in reader.lines() {
+                            if let Ok(line) = line_res {
+                                if line.starts_with("WAKEWORD:") {
+                                    detected_flag_clone.store(true, Ordering::SeqCst);
+                                    break;
+                                }
+                            }
+                        }
+                    });
+
+                    let mut raw_8ch = if is_hw_pdm { vec![0u8; CHUNK_SIZE * 8] } else { Vec::new() };
+
+                    loop {
+                        if !self.enabled.load(Ordering::Relaxed) {
+                            debug!("Wake-word disabled, breaking inner loop");
+                            break;
+                        }
+                        if self.is_processing.load(Ordering::Relaxed) {
+                            debug!("Wake-word assistant is_processing, breaking inner loop");
+                            break;
+                        }
+                        if self.tts.is_speaking() {
+                            debug!("Wake-word TTS is speaking, breaking inner loop");
+                            break;
+                        }
+                        if Path::new("/tmp/listen.lock").exists() {
+                            debug!("Wake-word /tmp/listen.lock exists, breaking inner loop");
+                            break;
+                        }
+
+                        if is_hw_pdm {
+                            if let Err(e) = arecord_stdout.read_exact(&mut raw_8ch) {
+                                warn!("Wake-word arecord 8ch read error: {}", e);
+                                break;
+                            }
+                            for i in 0..800 {
+                                let offset = i * 16;
+                                let s0 = i16::from_le_bytes([raw_8ch[offset], raw_8ch[offset + 1]]) as i32;
+                                let s1 = i16::from_le_bytes([raw_8ch[offset + 4], raw_8ch[offset + 5]]) as i32;
+                                let s2 = i16::from_le_bytes([raw_8ch[offset + 8], raw_8ch[offset + 9]]) as i32;
+                                let s3 = i16::from_le_bytes([raw_8ch[offset + 12], raw_8ch[offset + 13]]) as i32;
+                                let avg = ((s0 + s1 + s2 + s3) / 4) as i16;
+                                let b = avg.to_le_bytes();
+                                chunk[i * 2] = b[0];
+                                chunk[i * 2 + 1] = b[1];
+                            }
+                        } else {
+                            if let Err(e) = arecord_stdout.read_exact(&mut chunk) {
+                                warn!("Wake-word arecord mono read error: {}", e);
+                                break;
+                            }
+                        }
+
+                        // Feed mono audio chunk into native spotter
+                        if let Err(e) = spotter_stdin.write_all(&chunk) {
+                            warn!("Wake-word spotter_stdin write error: {}", e);
+                            break;
+                        }
+
+                        // Check if wake-word "Алиса" was spotted!
+                        if detected_flag.load(Ordering::SeqCst) {
+                            info!("*** NATIVE YANDEX SPOTTER TRIGGERED: 'Алиса' ***");
+
+                            // 1. Mark processing active
+                            self.is_processing.store(true, Ordering::SeqCst);
+
+                            // 2. Kill capture & spotter immediately to free ALSA mic device
+                            let _ = arecord_child.kill();
+                            let _ = arecord_child.wait();
+                            let _ = spotter_child.kill();
+                            let _ = spotter_child.wait();
+
+                            // 3. Pause background music if playing
+                            rt_handle.block_on(self.player.pause(&self.led));
+
+                            // 4. Play assistant chime sound (270ms)
+                            play_assistant_chime(&self.playback_card);
+
+                            // 5. Trigger assistant turn (records user command with pulsing blue LED)
+                            let _ = rt_handle.block_on(trigger_tx.send(None));
+
+                            // Exit loop until assistant completes turn
+                            break;
+                        }
+                    }
+
+                    let _ = arecord_child.kill();
+                    let _ = arecord_child.wait();
+                    let _ = spotter_child.kill();
+                    let _ = spotter_child.wait();
+                    let _ = reader_thread.join();
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+
+                // PATH 2: FALLBACK (RMS Energy + Cloud STT)
                 let mut raw_8ch = if is_hw_pdm { vec![0u8; CHUNK_SIZE * 8] } else { Vec::new() };
-                let mut pre_roll: VecDeque<Vec<u8>> = VecDeque::with_capacity(8); // ~350ms pre-roll
-                let mut speech_buffer: Vec<u8> = Vec::with_capacity(16000 * 2 * 4); // up to 4s speech
+                let mut pre_roll: VecDeque<Vec<u8>> = VecDeque::with_capacity(8);
+                let mut speech_buffer: Vec<u8> = Vec::with_capacity(16000 * 2 * 4);
                 let mut speech_active = false;
                 let mut silence_chunks: usize = 0;
                 let mut noise_floor_sum: f64 = 0.0;
                 let mut noise_samples: usize = 0;
 
                 loop {
-                    // Check if external conditions interrupted listening
                     if !self.enabled.load(Ordering::Relaxed)
                         || self.is_processing.load(Ordering::Relaxed)
                         || self.tts.is_speaking()
@@ -281,7 +425,7 @@ impl WakeWordService {
                     }
 
                     if is_hw_pdm {
-                        if stdout.read_exact(&mut raw_8ch).is_err() {
+                        if arecord_stdout.read_exact(&mut raw_8ch).is_err() {
                             break;
                         }
                         for i in 0..800 {
@@ -296,7 +440,7 @@ impl WakeWordService {
                             chunk[i * 2 + 1] = b[1];
                         }
                     } else {
-                        if stdout.read_exact(&mut chunk).is_err() {
+                        if arecord_stdout.read_exact(&mut chunk).is_err() {
                             break;
                         }
                     }
@@ -314,7 +458,6 @@ impl WakeWordService {
                             noise_floor_sum += rms;
                             noise_samples += 1;
                         } else {
-                            // Moving average noise floor
                             let curr_floor = noise_floor_sum / noise_samples as f64;
                             noise_floor_sum = curr_floor * 0.95 + rms * 0.05;
                             noise_samples = 1;
@@ -334,7 +477,6 @@ impl WakeWordService {
                         pre_roll.push_back(chunk.clone());
 
                         if rms > speech_threshold {
-                            // Speech onset detected!
                             speech_active = true;
                             silence_chunks = 0;
                             speech_buffer.clear();
@@ -344,7 +486,6 @@ impl WakeWordService {
                             speech_buffer.extend_from_slice(&chunk);
                         }
                     } else {
-                        // Speech active
                         speech_buffer.extend_from_slice(&chunk);
 
                         let noise_floor = noise_floor_sum / noise_samples.max(1) as f64;
@@ -358,16 +499,13 @@ impl WakeWordService {
 
                         let total_speech_chunks = speech_buffer.len() / CHUNK_SIZE;
 
-                        // Stop phrase capture if user paused for ~650ms (13 chunks) OR phrase reached 3.5s (70 chunks)
                         if silence_chunks >= 13 || total_speech_chunks >= 70 {
                             speech_active = false;
 
-                            // Minimum phrase length: at least 7 chunks (350ms) to avoid single clicks
                             if total_speech_chunks >= 7 {
                                 let wav = pcm_to_wav(&speech_buffer, self.sample_rate, 1, 16);
                                 let phrase_target = rt_handle.block_on(self.get_phrase());
 
-                                // Transcribe audio segment
                                 let transcribe_res = rt_handle.block_on(self.stt.transcribe_wav(&wav));
 
                                 if let Ok(transcribed) = transcribe_res {
@@ -381,26 +519,16 @@ impl WakeWordService {
                                                 clean_trans, cmd_opt
                                             );
 
-                                            // Mark processing active to prevent concurrent triggers
                                             self.is_processing.store(true, Ordering::SeqCst);
 
-                                            // Stop arecord capture immediately
-                                            let _ = child.kill();
-                                            let _ = child.wait();
+                                            let _ = arecord_child.kill();
+                                            let _ = arecord_child.wait();
 
-                                            // 1. Pause music if playing
                                             rt_handle.block_on(self.player.pause(&self.led));
-
-                                            // 2. Set Alice Purple LED (180, 0, 255)
                                             self.led.set_rgb(180, 0, 255);
-
-                                            // 3. Play pleasant custom assistant chime
                                             play_assistant_chime(&self.playback_card);
 
-                                            // 4. Send trigger to assistant engine
                                             let _ = rt_handle.block_on(trigger_tx.send(cmd_opt));
-
-                                            // Exit child loop so we wait until processing is finished
                                             break;
                                         }
                                     }
@@ -413,8 +541,8 @@ impl WakeWordService {
                     }
                 }
 
-                let _ = child.kill();
-                let _ = child.wait();
+                let _ = arecord_child.kill();
+                let _ = arecord_child.wait();
                 std::thread::sleep(Duration::from_millis(100));
             }
         });

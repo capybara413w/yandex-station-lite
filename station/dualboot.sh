@@ -121,8 +121,7 @@ start_daemon_only() {
     # 5. Launch daemon if not already running
     if ! pidof station_daemon > /dev/null; then
         if [ -x /data/station_daemon ]; then
-            start-stop-daemon -S -b -x /data/station_daemon -m -p /tmp/station_daemon.pid -- 2>/dev/null || \
-            (nohup /data/station_daemon >/tmp/station_daemon.log 2>&1 &)
+            start-stop-daemon -S -b -x /data/station_daemon -m -p /tmp/station_daemon.pid -- 2>/dev/null
         fi
     fi
     set_led 0 150 255
@@ -175,8 +174,7 @@ fi
 # 2. Launch station_daemon immediately in background so Web UI & buttons are alive
 if ! pidof station_daemon > /dev/null; then
     if [ -x /data/station_daemon ]; then
-        start-stop-daemon -S -b -x /data/station_daemon -m -p /tmp/station_daemon.pid -- 2>/dev/null || \
-        (nohup /data/station_daemon >/tmp/station_daemon.log 2>&1 &)
+        start-stop-daemon -S -b -x /data/station_daemon -m -p /tmp/station_daemon.pid -- 2>/dev/null
     fi
 fi
 
