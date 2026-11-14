@@ -1462,7 +1462,7 @@
               <div class="m3-card-title" style="display: flex; align-items: center; gap: 8px;">
                 <span class="material-symbols-rounded" style="color: #b388ff;">mic</span>
                 <span>Голосовая активация (Wake-Word) и VAD</span>
-                <span style="font-size: 0.72rem; font-weight: 700; background: #372844; color: #d1c4e9; padding: 2px 8px; border-radius: 8px;">«Алиса»</span>
+                <span id="wakewordBadge" style="font-size: 0.72rem; font-weight: 700; background: #372844; color: #d1c4e9; padding: 2px 8px; border-radius: 8px;">«Алиса»</span>
               </div>
               <div style="display: flex; gap: 8px; align-items: center;">
                 <button type="button" id="wakewordToggleBtn" class="m3-btn m3-btn-primary" onclick="toggleWakeword()" style="display: flex; align-items: center; gap: 6px;">
@@ -1473,15 +1473,17 @@
             </div>
 
             <div style="font-size: 0.85rem; color: #a49ea8; line-height: 1.5; margin-bottom: 16px;">
-              Фоновый слушатель непрерывно отслеживает обращение <b style="color: #d1c4e9;">«Алиса»</b> или <b style="color: #ffb4c2;">one-shot команды</b> («Алиса, включи рок»). При обнаружении колонка воспроизводит аутентичный фиолетовый отклик и звук колокольчика, а умный алгоритм <b style="color: #78dc96;">VAD (Voice Activity Detection)</b> сам определяет, когда вы закончили говорить.
+              Фоновый слушатель непрерывно отслеживает обращение <b style="color: #d1c4e9;" id="wakewordDescPhrase">«Алиса»</b> или <b style="color: #ffb4c2;">one-shot команды</b> («Алиса, включи рок»). Можно использовать как «Алису», так и задать <b>любое своё ключевое слово</b> (например «Джарвис» или «Колонка»), а умный алгоритм <b style="color: #78dc96;">VAD (Voice Activity Detection)</b> сам определяет, когда вы закончили говорить.
             </div>
 
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
               <div style="background: #17151a; border-radius: 12px; padding: 12px 16px;">
-                <div style="font-size: 0.72rem; color: #8e8893;">Ключевое слово (Wake-Word):</div>
-                <div style="font-weight: 700; color: #d1c4e9; margin-top: 4px; display: flex; align-items: center; gap: 6px;">
-                  <span class="material-symbols-rounded" style="font-size: 16px; color: #b388ff;">record_voice_over</span>
-                  <span>«Алиса» / «Alice»</span>
+                <div style="font-size: 0.72rem; color: #8e8893; margin-bottom: 6px;">Ключевое слово (Wake-Word):</div>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                  <input type="text" id="wakewordPhraseInput" class="m3-input" value="алиса" placeholder="алиса, джарвис, колонка..." style="padding: 6px 10px; font-size: 0.85rem; border-radius: 8px; flex: 1;" onchange="saveWakewordPhrase(this.value)" />
+                  <button type="button" class="m3-btn m3-btn-tonal" onclick="saveWakewordPhrase(document.getElementById('wakewordPhraseInput').value)" style="padding: 6px 10px;" title="Сохранить ключевое слово">
+                    <span class="material-symbols-rounded" style="font-size: 18px;">save</span>
+                  </button>
                 </div>
               </div>
               <div style="background: #17151a; border-radius: 12px; padding: 12px 16px;">
@@ -2715,6 +2717,9 @@
           if (d.wakeword_enabled !== undefined) {
             updateWakewordUI(d.wakeword_enabled);
           }
+          if (d.wakeword_phrase) {
+            updateWakewordPhraseUI(d.wakeword_phrase);
+          }
           if (d.state) {
             isPlaying = d.state === 'playing';
             document.getElementById('playerStateBadge').innerText = d.state.toUpperCase();
@@ -2885,6 +2890,36 @@
         btn.style.color = '#a49ea8';
         if (icon) icon.innerText = 'hearing_disabled';
         if (text) text.innerText = 'Активация отключена';
+      }
+    }
+
+    function updateWakewordPhraseUI(phrase) {
+      if (!phrase) return;
+      const inp = document.getElementById('wakewordPhraseInput');
+      if (inp && document.activeElement !== inp) {
+        inp.value = phrase;
+      }
+      const badge = document.getElementById('wakewordBadge');
+      if (badge) badge.innerText = '«' + phrase + '»';
+      const desc = document.getElementById('wakewordDescPhrase');
+      if (desc) desc.innerText = '«' + phrase + '»';
+    }
+
+    async function saveWakewordPhrase(phrase) {
+      if (!phrase || !phrase.trim()) return;
+      try {
+        const clean = phrase.trim();
+        const res = await fetch('/api/wakeword', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phrase: clean })
+        });
+        const data = await res.json();
+        if (data.phrase) {
+          updateWakewordPhraseUI(data.phrase);
+        }
+      } catch (e) {
+        console.error('Save wakeword phrase error:', e);
       }
     }
 

@@ -272,6 +272,7 @@ struct SystemStatusResponse {
     ram_total_mb: u64,
     autoplay: bool,
     wakeword_enabled: bool,
+    wakeword_phrase: String,
 }
 
 async fn get_status_handler(State(state): State<AppState>) -> impl IntoResponse {
@@ -297,6 +298,7 @@ async fn get_status_handler(State(state): State<AppState>) -> impl IntoResponse 
     let uptime_secs = state.start_time.elapsed().as_secs();
     let autoplay = state.player.is_autoplay();
     let wakeword_enabled = state.wakeword.is_enabled();
+    let wakeword_phrase = state.wakeword.get_phrase().await;
 
     Json(SystemStatusResponse {
         volume,
@@ -319,6 +321,7 @@ async fn get_status_handler(State(state): State<AppState>) -> impl IntoResponse 
         ram_total_mb,
         autoplay,
         wakeword_enabled,
+        wakeword_phrase,
     })
 }
 
