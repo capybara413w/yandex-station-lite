@@ -32,6 +32,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("=== Starting Yandex Station Lite Autonomous Daemon (aarch64) ===");
 
+    // Free any stale ALSA captures or playbacks
+    let _ = std::process::Command::new("killall").args(["-9", "arecord", "aplay"]).output();
+
     // Check CLI arguments for Dual Boot controls
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--quasar") {

@@ -226,13 +226,16 @@ impl WakeWordService {
                     continue;
                 }
 
+                let is_hw_pdm = self.record_device.contains("hw:0,1");
+                let channels_arg = if is_hw_pdm { "8" } else { "1" };
+
                 // Spawn arecord process for continuous background microphone capture
                 let mut child = match Command::new(arecord_bin)
                     .args([
                         "-D", &self.record_device,
                         "-f", "S16_LE",
                         "-r", &rate_str,
-                        "-c", "1",
+                        "-c", channels_arg,
                         "-t", "raw",
                         "-q",
                     ])
@@ -258,6 +261,8 @@ impl WakeWordService {
                     }
                 };
 
+                // 8-channel raw buffer for 800 frames = 800 * 8 * 2 = 12800 bytes
+                let mut raw_8ch = if is_hw_pdm { vec![0u8; CHUNK_SIZE * 8] } else { Vec::new() };
                 let mut pre_roll: VecDeque<Vec<u8>> = VecDeque::with_capacity(8); // ~350ms pre-roll
                 let mut speech_buffer: Vec<u8> = Vec::with_capacity(16000 * 2 * 4); // up to 4s speech
                 let mut speech_active = false;
@@ -275,8 +280,25 @@ impl WakeWordService {
                         break;
                     }
 
-                    if stdout.read_exact(&mut chunk).is_err() {
-                        break;
+                    if is_hw_pdm {
+                        if stdout.read_exact(&mut raw_8ch).is_err() {
+                            break;
+                        }
+                        for i in 0..800 {
+                            let offset = i * 16;
+                            let s0 = i16::from_le_bytes([raw_8ch[offset], raw_8ch[offset + 1]]) as i32;
+                            let s1 = i16::from_le_bytes([raw_8ch[offset + 4], raw_8ch[offset + 5]]) as i32;
+                            let s2 = i16::from_le_bytes([raw_8ch[offset + 8], raw_8ch[offset + 9]]) as i32;
+                            let s3 = i16::from_le_bytes([raw_8ch[offset + 12], raw_8ch[offset + 13]]) as i32;
+                            let avg = ((s0 + s1 + s2 + s3) / 4) as i16;
+                            let b = avg.to_le_bytes();
+                            chunk[i * 2] = b[0];
+                            chunk[i * 2 + 1] = b[1];
+                        }
+                    } else {
+                        if stdout.read_exact(&mut chunk).is_err() {
+                            break;
+                        }
                     }
 
                     // Calculate RMS

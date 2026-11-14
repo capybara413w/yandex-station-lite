@@ -3314,6 +3314,7 @@ async fn post_dualboot_choose_handler(
 
 async fn post_switch_quasar_handler() -> impl IntoResponse {
     tokio::spawn(async {
+        let _ = std::process::Command::new("killall").args(["-9", "arecord", "aplay", "mpg123", "ffmpeg"]).output();
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         let _ = std::process::Command::new("sh")
             .arg("-c")

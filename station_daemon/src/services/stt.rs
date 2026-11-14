@@ -62,12 +62,15 @@ impl SttService {
             use std::io::Read;
             use std::collections::VecDeque;
 
+            let is_hw_pdm = rec_dev.contains("hw:0,1");
+            let channels_arg = if is_hw_pdm { "8" } else { "1" };
+
             let mut child = Command::new(arecord_bin)
                 .args([
                     "-D", &rec_dev,
                     "-f", "S16_LE",
                     "-r", &rate_str,
-                    "-c", "1",
+                    "-c", channels_arg,
                     "-t", "raw",
                     "-q",
                 ])
@@ -82,6 +85,8 @@ impl SttService {
             // 50ms chunk at 16000Hz, 16-bit mono = 800 samples = 1600 bytes
             const CHUNK_SIZE: usize = 1600;
             let mut chunk = vec![0u8; CHUNK_SIZE];
+            // 8-channel raw buffer for 800 frames = 800 * 8 * 2 = 12800 bytes
+            let mut raw_8ch = if is_hw_pdm { vec![0u8; CHUNK_SIZE * 8] } else { Vec::new() };
             let mut pre_roll: VecDeque<Vec<u8>> = VecDeque::with_capacity(8); // ~350ms pre-roll
             let mut recorded: Vec<u8> = Vec::with_capacity(16000 * 2 * max_secs as usize);
 
@@ -101,8 +106,26 @@ impl SttService {
             let max_idle_chunks = 120;
 
             loop {
-                if stdout.read_exact(&mut chunk).is_err() {
-                    break;
+                if is_hw_pdm {
+                    if stdout.read_exact(&mut raw_8ch).is_err() {
+                        break;
+                    }
+                    // Hardware downmixing of the 4 PDM microphones (interleaved channels 0, 2, 4, 6)
+                    for i in 0..800 {
+                        let offset = i * 16;
+                        let s0 = i16::from_le_bytes([raw_8ch[offset], raw_8ch[offset + 1]]) as i32;
+                        let s1 = i16::from_le_bytes([raw_8ch[offset + 4], raw_8ch[offset + 5]]) as i32;
+                        let s2 = i16::from_le_bytes([raw_8ch[offset + 8], raw_8ch[offset + 9]]) as i32;
+                        let s3 = i16::from_le_bytes([raw_8ch[offset + 12], raw_8ch[offset + 13]]) as i32;
+                        let avg = ((s0 + s1 + s2 + s3) / 4) as i16;
+                        let b = avg.to_le_bytes();
+                        chunk[i * 2] = b[0];
+                        chunk[i * 2 + 1] = b[1];
+                    }
+                } else {
+                    if stdout.read_exact(&mut chunk).is_err() {
+                        break;
+                    }
                 }
                 total_chunks += 1;
 
