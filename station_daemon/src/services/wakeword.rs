@@ -205,6 +205,16 @@ impl WakeWordService {
 
             let rt_handle = tokio::runtime::Handle::current();
 
+            // Ensure microphone amplifier gain is optimal before capture loop starts
+            let amixer_bin = if Path::new("/opt/bin/amixer").exists() {
+                "/opt/bin/amixer"
+            } else if Path::new("/usr/bin/amixer").exists() {
+                "/usr/bin/amixer"
+            } else {
+                "amixer"
+            };
+            let _ = Command::new(amixer_bin).args(["sset", "PDM Gain", "36"]).output();
+
             loop {
                 // If disabled, pause
                 if !self.enabled.load(Ordering::Relaxed) {

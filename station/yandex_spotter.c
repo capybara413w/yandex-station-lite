@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/stat.h>
+#include <dirent.h>
 
 typedef void* (*spotter_conf_read_fn)(const char* dir_path, void** err);
 typedef void* (*spotter_multi_conf_create_fn)(const char* name, size_t name_len, void** err);
@@ -35,6 +36,49 @@ static void handle_sig(int sig) {
 static int file_exists(const char* path) {
     struct stat st;
     return (stat(path, &st) == 0);
+}
+
+static void find_model_path(char* out_path, size_t max_len, const char* keyword, const char* default_path) {
+    DIR* d = opendir("/data/quasar/data/spotter_model");
+    if (d) {
+        struct dirent* dir;
+        while ((dir = readdir(d)) != NULL) {
+            if (dir->d_name[0] == '.') continue;
+            char candidate[256];
+            snprintf(candidate, sizeof(candidate), "/data/quasar/data/spotter_model/%s", dir->d_name);
+            
+            if (strcmp(keyword, "ca") == 0) {
+                char check[300];
+                snprintf(check, sizeof(check), "%s/counteractivation-features", candidate);
+                if (file_exists(check)) {
+                    strncpy(out_path, candidate, max_len - 1);
+                    out_path[max_len - 1] = '\0';
+                    closedir(d);
+                    return;
+                }
+            } else {
+                char words_file[300];
+                snprintf(words_file, sizeof(words_file), "%s/words.txt", candidate);
+                FILE* wf = fopen(words_file, "r");
+                if (wf) {
+                    char line[128];
+                    while (fgets(line, sizeof(line), wf)) {
+                        if (strstr(line, keyword)) {
+                            fclose(wf);
+                            strncpy(out_path, candidate, max_len - 1);
+                            out_path[max_len - 1] = '\0';
+                            closedir(d);
+                            return;
+                        }
+                    }
+                    fclose(wf);
+                }
+            }
+        }
+        closedir(d);
+    }
+    strncpy(out_path, default_path, max_len - 1);
+    out_path[max_len - 1] = '\0';
 }
 
 int main(int argc, char** argv) {
@@ -77,22 +121,26 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Active model directories on Station Lite
-    const char* alisa_path = "/data/quasar/data/spotter_model/4b4cbc57-338c-499c-a2d0-2edf81e00aa2";
-    const char* vad_path   = "/data/quasar/data/spotter_model/386347ed-af5f-4b35-8c70-d4bb88be1c9b";
-    const char* ca_path    = "/data/quasar/data/spotter_model/b7b728b2-fd2f-4d89-999b-eb2fdb44ed3b";
+    char alisa_path[256];
+    char vad_path[256];
+    char ca_path[256];
 
-    // Fallbacks if data models were reset or missing
-    if (!file_exists(alisa_path)) {
-        alisa_path = "/system/vendor/quasar/spotter_models/activation/alisa";
+    find_model_path(alisa_path, sizeof(alisa_path), "алиса", "/system/vendor/quasar/spotter_models/activation/alisa");
+    find_model_path(vad_path, sizeof(vad_path), "<speech_started>", "/system/vendor/quasar/spotter_models/vad");
+    find_model_path(ca_path, sizeof(ca_path), "ca", "/system/vendor/quasar/spotter_models/counteractivation");
+
+    if (verbose) {
+        fprintf(stdout, "[DEBUG] Alisa model: %s\n", alisa_path);
+        fprintf(stdout, "[DEBUG] VAD model: %s\n", vad_path);
+        fprintf(stdout, "[DEBUG] CA model: %s\n", ca_path);
     }
 
     void* err = NULL;
     void* conf_alisa = conf_read(alisa_path, &err);
-    void* conf_vad = file_exists(vad_path) ? conf_read(vad_path, &err) : NULL;
-    void* conf_ca  = file_exists(ca_path)  ? conf_read(ca_path, &err)  : NULL;
+    void* conf_vad = conf_read(vad_path, &err);
+    void* conf_ca = conf_read(ca_path, &err);
 
-    if (!conf_alisa) {
+    if (!conf_alisa || !conf_vad || !conf_ca) {
         fprintf(stdout, "ERROR:model_load_failed\n");
         return 1;
     }
@@ -104,17 +152,11 @@ int main(int argc, char** argv) {
     }
 
     multi_attach(multi_conf, conf_alisa, &err);
-    size_t num_components = 1;
-    int channels[3] = {0, 0, 0};
+    multi_attach(multi_conf, conf_vad, &err);
+    multi_attach(multi_conf, conf_ca, &err);
 
-    if (conf_vad) {
-        multi_attach(multi_conf, conf_vad, &err);
-        channels[num_components++] = 3;
-    }
-    if (conf_ca) {
-        multi_attach(multi_conf, conf_ca, &err);
-        channels[num_components++] = 4;
-    }
+    int channels[3] = {0, 3, 4};
+    size_t num_components = 3;
 
     void* spotter = create_multi(multi_conf, 16000, num_components, channels, 1, 0, &err);
     if (!spotter) {
@@ -125,11 +167,11 @@ int main(int argc, char** argv) {
     fprintf(stdout, "READY\n");
     fflush(stdout);
 
-    // Audio stream processing:
+    // Stream audio processing:
     // Takes 800 samples of 16-bit mono PCM (50ms chunks = 1600 bytes)
-    // Duplicates mono sample across active components
+    // Duplicates mono sample across the 3 active components [s, s, s]
     int16_t mono_buf[800];
-    int16_t multi_buf[800 * 3];
+    int16_t tri_buf[800 * 3];
 
     while (running) {
         size_t samples_read = fread(mono_buf, sizeof(int16_t), 800, stdin);
@@ -139,13 +181,13 @@ int main(int argc, char** argv) {
 
         for (size_t i = 0; i < samples_read; i++) {
             int16_t s = mono_buf[i];
-            for (size_t c = 0; c < num_components; c++) {
-                multi_buf[i * num_components + c] = s;
-            }
+            tri_buf[i * 3 + 0] = s;
+            tri_buf[i * 3 + 1] = s;
+            tri_buf[i * 3 + 2] = s;
         }
 
-        size_t bytes_to_submit = samples_read * num_components * sizeof(int16_t);
-        int ret = submit_raw(spotter, (const char*)multi_buf, bytes_to_submit, &err);
+        size_t bytes_to_submit = samples_read * 3 * sizeof(int16_t);
+        int ret = submit_raw(spotter, (const char*)tri_buf, bytes_to_submit, &err);
         if (ret < 0) {
             break;
         }

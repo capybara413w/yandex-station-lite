@@ -279,14 +279,14 @@ def check_speaker_dependencies(ip):
     })
 
     # 7. Spotter models
-    code, out, _ = adb_shell(ip, "[ -f /system/vendor/quasar/spotter_models/activation/model ] && echo 'FOUND'", timeout=5)
+    code, out, _ = adb_shell(ip, "[ -f /system/vendor/quasar/spotter_models/activation/alisa/acoustic_model.nnet ] || [ -d /data/quasar/data/spotter_model ] && echo 'FOUND'", timeout=5)
     spotter_models_ok = "FOUND" in out
     report["items"].append({
         "id": "spotter_models",
         "name": "Нейромодели активации «Алиса»",
         "ok": spotter_models_ok,
         "critical": False,
-        "status": "Оригинальные модели на месте" if spotter_models_ok else "Модели споттера не найдены в /system",
+        "status": "Оригинальные модели на месте" if spotter_models_ok else "Модели споттера не найдены",
         "desc": "Оффлайн-распознавание ключевого слова на процессоре Amlogic A113X"
     })
 
@@ -341,6 +341,18 @@ def check_speaker_dependencies(ip):
         "desc": "Главный исполняемый сервис автономного голосового ассистента"
     })
 
+    # 12. Native Yandex Spotter binary
+    code, out, _ = adb_shell(ip, "[ -x /data/yandex_spotter ] && echo 'FOUND'", timeout=5)
+    spotter_ok = "FOUND" in out
+    report["items"].append({
+        "id": "yandex_spotter",
+        "name": "Оффлайн-споттер «Алиса» (yandex_spotter)",
+        "ok": spotter_ok,
+        "critical": False,
+        "status": "Установлен (/data/yandex_spotter)" if spotter_ok else "Не найден (будет установлен автоматически)",
+        "desc": "Локальное оффлайн-распознавание ключевого слова на чипе Amlogic с нулевой задержкой"
+    })
+
     return report
 
 def auto_fix_dependencies(ip, log_fn=print):
@@ -361,9 +373,11 @@ def auto_fix_dependencies(ip, log_fn=print):
     # 4. Check & push native spotter if missing
     code, out, _ = adb_shell(ip, "[ -x /data/yandex_spotter ] && echo 'OK'")
     if "OK" not in out:
-        spotter_bin = os.path.join(SCRIPT_DIR, "yandex_spotter")
+        spotter_bin = os.path.join(SCRIPT_DIR, "tools", "yandex_spotter")
+        if not os.path.exists(spotter_bin):
+            spotter_bin = os.path.join(SCRIPT_DIR, "yandex_spotter")
         if os.path.exists(spotter_bin):
-            log_fn("  -> Загрузка бинарника yandex_spotter...")
+            log_fn("  -> Загрузка бинарника yandex_spotter (/data/yandex_spotter)...")
             adb_cmd(ip, ["push", spotter_bin, "/data/yandex_spotter"])
             adb_shell(ip, "chmod +x /data/yandex_spotter")
     
@@ -630,14 +644,14 @@ def install_station_daemon(ip, mode="daemon", log_fn=print):
             log_fn("  -> Загрузка базовой конфигурации config.json...")
             adb_cmd(ip, ["push", cfg_path, "/data/config.json"])
 
-    # 6. Check / compile native spotter if missing
-    code, out, _ = adb_shell(ip, "[ -x /data/yandex_spotter ] && echo 'ok'")
-    if "ok" not in out:
+    # 6. Always push latest native spotter
+    spotter_bin = os.path.join(SCRIPT_DIR, "tools", "yandex_spotter")
+    if not os.path.exists(spotter_bin):
         spotter_bin = os.path.join(SCRIPT_DIR, "yandex_spotter")
-        if os.path.exists(spotter_bin):
-            log_fn("  -> Загрузка нативного споттера Яндекса...")
-            adb_cmd(ip, ["push", spotter_bin, "/data/yandex_spotter"])
-            adb_shell(ip, "chmod +x /data/yandex_spotter")
+    if os.path.exists(spotter_bin):
+        log_fn("  -> Загрузка нативного оффлайн-споттера Яндекса (/data/yandex_spotter)...")
+        adb_cmd(ip, ["push", spotter_bin, "/data/yandex_spotter"])
+        adb_shell(ip, "chmod +x /data/yandex_spotter")
 
     # 7. Setup boot mode
     log_fn(f"  -> Настройка режима автозагрузки ({mode})...")

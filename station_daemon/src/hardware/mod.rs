@@ -282,6 +282,18 @@ pub struct AudioHardware {
 
 impl AudioHardware {
     pub fn new(config: &AudioConfig) -> Self {
+        // Guarantee microphone preamp gain is set to 36 for Amlogic PDM mic array
+        let amixer_bin = if Path::new("/opt/bin/amixer").exists() {
+            "/opt/bin/amixer"
+        } else if Path::new("/usr/bin/amixer").exists() {
+            "/usr/bin/amixer"
+        } else {
+            "amixer"
+        };
+        let _ = std::process::Command::new(amixer_bin)
+            .args(["sset", "PDM Gain", "36"])
+            .output();
+
         // Read initial volume step from /data/volume if valid (1..=10), otherwise use config or 6
         let initial_step = if let Ok(s) = fs::read_to_string("/data/volume") {
             s.trim().parse::<u8>().unwrap_or(config.initial_volume).clamp(1, 10)
