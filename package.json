@@ -12,10 +12,13 @@
     "start": "NODE_ENV=production tsx server.ts"
   },
   "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/plus-jakarta-sans": "^5.3.0",
     "@types/qrcode": "^1.5.6",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "lucide-react": "^1.16.0",
+    "material-symbols": "^0.49.0",
     "multer": "^1.4.5-lts.1",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",

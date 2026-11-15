@@ -609,12 +609,18 @@ def install_station_daemon(ip, mode="daemon", log_fn=print):
                 adb_cmd(ip, ["push", local_f, f"/data/{f}"])
         adb_shell(ip, "chmod +x /data/*.sh 2>/dev/null")
 
-    # 4b. Push web dashboard (dist) to /data/station_web
+    # 4b. Push web dashboard (dist) and offline fonts to /data/station_web
     dist_dir = os.path.join(SCRIPT_DIR, "dist")
     if os.path.exists(dist_dir):
         log_fn("  -> Загрузка актуальной веб-панели управления (/data/station_web)...")
-        adb_shell(ip, "mkdir -p /data/station_web")
+        adb_shell(ip, "mkdir -p /data/station_web /data/station_web/fonts")
         adb_cmd(ip, ["push", os.path.join(dist_dir, "."), "/data/station_web/"])
+
+    font_src = os.path.join(SCRIPT_DIR, "tools", "fonts", "material-symbols-rounded.woff2")
+    if os.path.exists(font_src):
+        log_fn("  -> Загрузка локального шрифта иконок Material Symbols в /data/station_web/fonts...")
+        adb_shell(ip, "mkdir -p /data/station_web/fonts")
+        adb_cmd(ip, ["push", font_src, "/data/station_web/fonts/material-symbols-rounded.woff2"])
 
     # 5. Push config if not present
     code, out, _ = adb_shell(ip, "[ -f /data/config.json ] && echo 'exists'")
@@ -715,6 +721,29 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"ip": WebInstallerHandler.target_ip}).encode("utf-8"))
             return
 
+        elif path.startswith("/fonts/"):
+            filename = os.path.basename(path)
+            candidates = [
+                os.path.join(SCRIPT_DIR, "tools", "fonts", filename),
+                os.path.join(SCRIPT_DIR, "public", "fonts", filename),
+                os.path.join(SCRIPT_DIR, "node_modules", "material-symbols", filename)
+            ]
+            font_path = None
+            for c in candidates:
+                if os.path.exists(c):
+                    font_path = c
+                    break
+            if font_path:
+                self.send_response(200)
+                self.send_header("Content-Type", "font/woff2")
+                self.send_header("Cache-Control", "public, max-age=31536000")
+                self.end_headers()
+                with open(font_path, "rb") as f:
+                    self.wfile.write(f.read())
+                return
+            self.send_error(404, "Font Not Found")
+            return
+
         elif path == "/" or path == "/index.html":
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -808,11 +837,15 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Яндекс Станция Лайт — Установщик и Менеджер</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,500&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
   <style>
+    @font-face {
+      font-family: 'Material Symbols Rounded';
+      font-style: normal;
+      font-weight: 100 700;
+      font-display: block;
+      src: url('/fonts/material-symbols-rounded.woff2') format('woff2');
+    }
+
     :root {
       --md-sys-color-primary: #ffb4c2;
       --md-sys-color-on-primary: #370014;
@@ -842,8 +875,8 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       --md-sys-color-success: #78dc96;
       --md-sys-color-warning: #f8c057;
 
-      --md-sys-typescale-font: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-      --md-sys-typescale-mono: 'JetBrains Mono', monospace;
+      --md-sys-typescale-font: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      --md-sys-typescale-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       
       --md-sys-shape-corner-xs: 4px;
       --md-sys-shape-corner-sm: 8px;

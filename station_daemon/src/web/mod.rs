@@ -225,15 +225,20 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/dualboot/mode", post(post_dualboot_mode_handler))
         // Static assets fallback if /data/station_web exists
         .nest_service("/static", ServeDir::new(static_dir))
+        .nest_service("/assets", ServeDir::new("/data/station_web/assets"))
+        .nest_service("/fonts", ServeDir::new("/data/station_web/fonts"))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
 
 /// Serves the web control panel:
-/// The rich Material 3 web UI is compiled directly into the binary (EMBEDDED_HTML).
-/// This ensures binary updates on the station immediately reflect in the browser without stale disk cache.
+/// Checks if /data/station_web/index.html is installed on disk; if not, falls back to EMBEDDED_HTML.
 async fn index_handler(State(_state): State<AppState>) -> impl IntoResponse {
-    Html(EMBEDDED_HTML.to_string())
+    if let Ok(content) = std::fs::read_to_string("/data/station_web/index.html") {
+        Html(content)
+    } else {
+        Html(EMBEDDED_HTML.to_string())
+    }
 }
 
 async fn health_handler() -> impl IntoResponse {
