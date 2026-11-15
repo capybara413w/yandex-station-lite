@@ -244,6 +244,8 @@ async fn index_handler(State(_state): State<AppState>) -> impl IntoResponse {
 async fn health_handler() -> impl IntoResponse {
     let local_ip = get_local_ip();
     let (ram_used_mb, ram_total_mb) = get_mem_stats();
+    let cpu_temp_c = get_cpu_temp();
+    let cpu_load_percent = get_cpu_load_percent();
     Json(serde_json::json!({
         "status": "ok",
         "service": "Yandex Station Lite Autonomous Daemon",
@@ -252,6 +254,8 @@ async fn health_handler() -> impl IntoResponse {
         "station_ip": local_ip,
         "ram_used_mb": ram_used_mb,
         "ram_total_mb": ram_total_mb,
+        "cpu_temp_c": cpu_temp_c,
+        "cpu_load_percent": cpu_load_percent,
     }))
 }
 
@@ -275,6 +279,8 @@ struct SystemStatusResponse {
     uptime_secs: u64,
     ram_used_mb: u64,
     ram_total_mb: u64,
+    cpu_temp_c: f32,
+    cpu_load_percent: u8,
     autoplay: bool,
     wakeword_enabled: bool,
     wakeword_phrase: String,
@@ -300,6 +306,8 @@ async fn get_status_handler(State(state): State<AppState>) -> impl IntoResponse 
     let led_color = state.led.get_rgb();
     let station_ip = get_local_ip();
     let (ram_used_mb, ram_total_mb) = get_mem_stats();
+    let cpu_temp_c = get_cpu_temp();
+    let cpu_load_percent = get_cpu_load_percent();
     let uptime_secs = state.start_time.elapsed().as_secs();
     let autoplay = state.player.is_autoplay();
     let wakeword_enabled = state.wakeword.is_enabled();
@@ -324,6 +332,8 @@ async fn get_status_handler(State(state): State<AppState>) -> impl IntoResponse 
         uptime_secs,
         ram_used_mb,
         ram_total_mb,
+        cpu_temp_c,
+        cpu_load_percent,
         autoplay,
         wakeword_enabled,
         wakeword_phrase,
@@ -2788,6 +2798,28 @@ pub fn get_local_ip() -> String {
         }
     }
     "127.0.0.1".to_string()
+}
+
+fn get_cpu_temp() -> f32 {
+    if let Ok(raw) = std::fs::read_to_string("/sys/class/thermal/thermal_zone0/temp") {
+        if let Ok(milli) = raw.trim().parse::<f32>() {
+            return (milli / 1000.0 * 10.0).round() / 10.0;
+        }
+    }
+    44.0
+}
+
+fn get_cpu_load_percent() -> u8 {
+    if let Ok(raw) = std::fs::read_to_string("/proc/loadavg") {
+        if let Some(first) = raw.split_whitespace().next() {
+            if let Ok(load1) = first.parse::<f32>() {
+                // Amlogic A113X has 4 Cortex-A53 cores
+                let pct = (load1 / 4.0 * 100.0).clamp(1.0, 100.0);
+                return pct.round() as u8;
+            }
+        }
+    }
+    8
 }
 
 fn get_mem_stats() -> (u64, u64) {

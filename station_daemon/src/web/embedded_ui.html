@@ -2970,6 +2970,18 @@
           if (d.ram_used_mb && d.ram_total_mb) {
             document.getElementById('telemRam').innerHTML = `${d.ram_used_mb} <span style="font-size: 0.85rem; font-weight: 500; color: #928b97;">/ ${d.ram_total_mb} MB</span>`;
           }
+          if (d.cpu_temp_c !== undefined) {
+            const tempVal = typeof d.cpu_temp_c === 'number' ? Math.round(d.cpu_temp_c) : d.cpu_temp_c;
+            const tempEl = document.getElementById('telemTemp');
+            if (tempEl) {
+              tempEl.innerText = `${tempVal}°C`;
+              tempEl.style.color = tempVal > 65 ? '#ff5252' : '#f5edf2';
+            }
+          }
+          if (d.cpu_load_percent !== undefined) {
+            const cpuEl = document.getElementById('telemCpu');
+            if (cpuEl) cpuEl.innerText = `${d.cpu_load_percent}%`;
+          }
           if (d.uptime_secs) {
             const h = Math.floor(d.uptime_secs / 3600);
             const m = Math.floor((d.uptime_secs % 3600) / 60);

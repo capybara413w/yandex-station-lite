@@ -583,6 +583,15 @@ export default function App() {
         if (data.visualizer_enabled !== undefined) {
           setVisualizerEnabledInput(data.visualizer_enabled);
         }
+        if (data.ram_used_mb !== undefined && data.ram_total_mb !== undefined) {
+          setTelemetry((prev) => ({
+            ...prev,
+            ram_used_mb: data.ram_used_mb,
+            ram_total_mb: data.ram_total_mb,
+            cpu_temp_c: typeof data.cpu_temp_c === 'number' ? Math.round(data.cpu_temp_c) : prev.cpu_temp_c,
+            cpu_load_percent: typeof data.cpu_load_percent === 'number' ? data.cpu_load_percent : prev.cpu_load_percent,
+          }));
+        }
       }
     } catch (e) {
       console.error(e);
@@ -608,18 +617,14 @@ export default function App() {
         const d = await res.json();
         setTelemetry((prev) => ({
           ...prev,
-          ram_used_mb: d.ram_used_mb || prev.ram_used_mb,
-          ram_total_mb: d.ram_total_mb || prev.ram_total_mb,
-          cpu_temp_c: 48 + Math.floor(Math.random() * 4),
-          cpu_load_percent: 12 + Math.floor(Math.random() * 8),
+          ram_used_mb: d.ram_used_mb ?? prev.ram_used_mb,
+          ram_total_mb: d.ram_total_mb ?? prev.ram_total_mb,
+          cpu_temp_c: typeof d.cpu_temp_c === 'number' ? Math.round(d.cpu_temp_c) : prev.cpu_temp_c,
+          cpu_load_percent: typeof d.cpu_load_percent === 'number' ? d.cpu_load_percent : prev.cpu_load_percent,
         }));
       }
-    } catch {
-      setTelemetry((prev) => ({
-        ...prev,
-        cpu_temp_c: 48 + Math.floor(Math.random() * 4),
-        cpu_load_percent: 10 + Math.floor(Math.random() * 8),
-      }));
+    } catch (e) {
+      console.error(e);
     }
   };
 
