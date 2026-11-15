@@ -84,9 +84,19 @@ def run_cmd(cmd_list, timeout=15):
     except Exception as e:
         return -2, "", str(e)
 
+_connected_ips = set()
+
+def adb_connect(ip):
+    if not ip:
+        return
+    if ip not in _connected_ips:
+        run_cmd([ADB_BIN, "connect", f"{ip}:5555"], timeout=3)
+        _connected_ips.add(ip)
+
 def adb_cmd(ip, args, timeout=20):
     cmd = [ADB_BIN]
     if ip:
+        adb_connect(ip)
         cmd.extend(["-s", f"{ip}:5555"])
     cmd.extend(args)
     return run_cmd(cmd, timeout=timeout)
@@ -102,9 +112,24 @@ def discover_speaker_ip():
         for line in out.splitlines():
             m = re.match(r"^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):5555\s+device", line.strip())
             if m:
-                return m.group(1)
+                ip = m.group(1)
+                if not ip.startswith("127."):
+                    return ip
 
-    # 2. Parse ARP table on Windows / Linux
+    # 2. Probe known/common static leases
+    known_ips = ["192.168.0.104", "192.168.0.105"]
+    for kip in known_ips:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.2)
+            if s.connect_ex((kip, 5555)) == 0:
+                s.close()
+                return kip
+            s.close()
+        except Exception:
+            pass
+
+    # 3. Parse ARP table on Windows / Linux (strictly private LAN IPs)
     try:
         code, out, _ = run_cmd(["arp", "-a"])
         candidates = []
@@ -113,14 +138,16 @@ def discover_speaker_ip():
                 m = re.search(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", line)
                 if m:
                     ip = m.group(1)
-                    if not ip.endswith(".255") and not ip.endswith(".1") and ip != "127.0.0.1":
-                        candidates.append(ip)
+                    if (ip.startswith("192.168.") or ip.startswith("10.") or 
+                        any(ip.startswith(f"172.{i}.") for i in range(16, 32))):
+                        if not ip.endswith(".255") and not ip.endswith(".1") and ip != "127.0.0.1":
+                            candidates.append(ip)
         
         # Test candidate IPs on port 5555
         for ip in set(candidates):
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(0.35)
+                s.settimeout(0.25)
                 if s.connect_ex((ip, 5555)) == 0:
                     s.close()
                     return ip
@@ -130,7 +157,225 @@ def discover_speaker_ip():
     except Exception:
         pass
 
-    return "192.168.0.105"
+    return "192.168.0.104"
+
+def check_speaker_dependencies(ip):
+    """Checks all system, audio, storage, memory, spotter and security dependencies on the speaker."""
+    report = {
+        "overall_ok": True,
+        "critical_ok": True,
+        "items": []
+    }
+    
+    adb_connect(ip)
+    
+    # 1. Root Access
+    code, out, _ = adb_shell(ip, "id", timeout=5)
+    is_root = (code == 0 and "uid=0" in out)
+    report["items"].append({
+        "id": "root",
+        "name": "Root-доступ (UID 0)",
+        "ok": is_root,
+        "critical": True,
+        "status": "Доступен (Root)" if is_root else "Недоступен (ADB offline или нет root)",
+        "desc": "Необходим для прямого управления аудиочипом, подсветкой, разделами и демоном"
+    })
+    if not is_root:
+        report["overall_ok"] = False
+        report["critical_ok"] = False
+        return report
+
+    # 2. Audio Tools (arecord, aplay, amixer)
+    code, out, _ = adb_shell(ip, "which arecord aplay amixer", timeout=5)
+    has_arecord = "arecord" in out
+    has_aplay = "aplay" in out
+    has_amixer = "amixer" in out
+    alsa_ok = has_arecord and has_aplay and has_amixer
+    report["items"].append({
+        "id": "alsa_tools",
+        "name": "Утилиты ALSA (arecord, aplay, amixer)",
+        "ok": alsa_ok,
+        "critical": True,
+        "status": "Установлены (/usr/bin)" if alsa_ok else "Отсутствуют утилиты ALSA",
+        "desc": "Служат для прямого захвата звука с микрофонов и воспроизведения ответов"
+    })
+    if not alsa_ok:
+        report["critical_ok"] = False
+        report["overall_ok"] = False
+
+    # 3. Audio hardware nodes
+    code, out, _ = adb_shell(ip, "ls -1 /dev/snd 2>/dev/null", timeout=5)
+    has_capture = "pcmC0D0c" in out
+    has_playback = "pcmC0D0p" in out
+    has_ctrl = "controlC0" in out
+    audio_hw_ok = has_capture and has_playback and has_ctrl
+    report["items"].append({
+        "id": "audio_hw",
+        "name": "Аудиоустройства ядра (/dev/snd/*)",
+        "ok": audio_hw_ok,
+        "critical": True,
+        "status": "PCM Playback + Capture активны" if audio_hw_ok else "Устройства ядра не найдены",
+        "desc": "Прямой доступ к 4-микрофонному массиву и усилителю динамика"
+    })
+    if not audio_hw_ok:
+        report["critical_ok"] = False
+        report["overall_ok"] = False
+
+    # 4. PDM Gain Mixer Control
+    code, out, _ = adb_shell(ip, "amixer sget 'PDM Gain' 2>/dev/null", timeout=5)
+    pdm_ok = (code == 0 and ("Limits" in out or "Mono:" in out or "Capture" in out))
+    gain_val = "36"
+    m = re.search(r"Mono:\s+Capture\s+(\d+)", out)
+    if m:
+        gain_val = m.group(1)
+    report["items"].append({
+        "id": "pdm_gain",
+        "name": "Микрофонный усилитель (PDM Gain)",
+        "ok": pdm_ok,
+        "critical": False,
+        "status": f"Доступен (усиление: {gain_val})" if pdm_ok else "Элемент PDM Gain не найден в ALSA",
+        "desc": "Аппаратное усиление аналого-цифровых микрофонов для чёткого распознавания вейкворда"
+    })
+
+    # 5. Disk storage on /data
+    code, out, _ = adb_shell(ip, "df -m /data 2>/dev/null", timeout=5)
+    avail_mb = 0
+    for line in out.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 4 and parts[3].isdigit():
+            avail_mb = int(parts[3])
+            break
+    disk_ok = avail_mb >= 15
+    report["items"].append({
+        "id": "storage",
+        "name": "Свободная память разделов (/data)",
+        "ok": disk_ok,
+        "critical": True,
+        "status": f"{avail_mb} МБ свободно (норма >= 15 МБ)" if avail_mb > 0 else "Не удалось определить размер",
+        "desc": "Место для station_daemon, веб-интерфейса, кэша и конфигурации"
+    })
+    if not disk_ok:
+        report["critical_ok"] = False
+        report["overall_ok"] = False
+
+    # 6. RAM
+    code, out, _ = adb_shell(ip, "free -m 2>/dev/null", timeout=5)
+    avail_ram = 0
+    for line in out.splitlines():
+        if "Mem:" in line:
+            parts = line.split()
+            if len(parts) >= 7 and parts[6].isdigit():
+                avail_ram = int(parts[6])
+            elif len(parts) >= 4 and parts[3].isdigit():
+                avail_ram = int(parts[3])
+    ram_ok = avail_ram >= 25
+    report["items"].append({
+        "id": "ram",
+        "name": "Оперативная память (RAM)",
+        "ok": ram_ok,
+        "critical": False,
+        "status": f"{avail_ram} МБ доступно (всего 244 МБ)",
+        "desc": "Необходима для запуска rust-демона, кольцевого аудиобуфера и нейросетевых запросов"
+    })
+
+    # 7. Spotter models
+    code, out, _ = adb_shell(ip, "[ -f /system/vendor/quasar/spotter_models/activation/model ] && echo 'FOUND'", timeout=5)
+    spotter_models_ok = "FOUND" in out
+    report["items"].append({
+        "id": "spotter_models",
+        "name": "Нейромодели активации «Алиса»",
+        "ok": spotter_models_ok,
+        "critical": False,
+        "status": "Оригинальные модели на месте" if spotter_models_ok else "Модели споттера не найдены в /system",
+        "desc": "Оффлайн-распознавание ключевого слова на процессоре Amlogic A113X"
+    })
+
+    # 8. Root RW remount
+    code, _, _ = adb_shell(ip, "mount -o remount,rw / && mount -o remount,ro /", timeout=5)
+    rw_ok = (code == 0)
+    report["items"].append({
+        "id": "root_rw",
+        "name": "Права записи корневой ФС (RW Remount)",
+        "ok": rw_ok,
+        "critical": True,
+        "status": "Доступна для записи (RW)" if rw_ok else "Ошибка перемонтирования / в RW",
+        "desc": "Необходимо для регистрации службы автозапуска /etc/init.d/S99station_daemon"
+    })
+    if not rw_ok:
+        report["critical_ok"] = False
+        report["overall_ok"] = False
+
+    # 9. Anti-OTA lock
+    code, out, _ = adb_shell(ip, "cat /system/vendor/quasar/ota_script.pub 2>/dev/null", timeout=5)
+    ota_locked = ("DUMMY" in out or "MIIBCgKCAQEAjQ29h" in out)
+    report["items"].append({
+        "id": "ota_lock",
+        "name": "Защита от автообновлений (Anti-OTA)",
+        "ok": ota_locked,
+        "critical": False,
+        "status": "Заблокированы (Бетонирование активно)" if ota_locked else "Не защищено (Риск обновления Яндексом)",
+        "desc": "Предотвращает скачивание официальных прошивок и сброс root-прав"
+    })
+
+    # 10. Internet
+    code, _, _ = adb_shell(ip, "ping -c 1 -w 2 1.1.1.1 2>/dev/null", timeout=5)
+    net_ok = (code == 0)
+    report["items"].append({
+        "id": "internet",
+        "name": "Доступ в Интернет (Wi-Fi)",
+        "ok": net_ok,
+        "critical": False,
+        "status": "Подключено (ping OK)" if net_ok else "Нет выхода в Интернет",
+        "desc": "Требуется для запросов к LLM (DeepSeek/Gemini/OpenRouter) и YouTube Music"
+    })
+
+    # 11. Station Daemon binary
+    code, out, _ = adb_shell(ip, "[ -x /data/station_daemon ] && echo 'FOUND'", timeout=5)
+    daemon_ok = "FOUND" in out
+    report["items"].append({
+        "id": "daemon_installed",
+        "name": "Бинарник Station Daemon",
+        "ok": daemon_ok,
+        "critical": False,
+        "status": "Установлен (/data/station_daemon)" if daemon_ok else "Не установлен (требуется установка)",
+        "desc": "Главный исполняемый сервис автономного голосового ассистента"
+    })
+
+    return report
+
+def auto_fix_dependencies(ip, log_fn=print):
+    """Automatically fixes common dependency issues on the speaker."""
+    log_fn("[*] Запуск автоматического устранения проблем с зависимостями...")
+    
+    # 1. Mount rw
+    adb_shell(ip, "mount -o remount,rw /")
+    
+    # 2. Ensure /data directories exist
+    log_fn("  -> Проверка и создание рабочих каталогов (/data, /data/quasar, /data/station_web)...")
+    adb_shell(ip, "mkdir -p /data/quasar /data/station_web")
+    
+    # 3. Setup PDM gain
+    log_fn("  -> Настройка усиления микрофонов (PDM Gain 36)...")
+    adb_shell(ip, "amixer sset 'PDM Gain' 36 2>/dev/null")
+    
+    # 4. Check & push native spotter if missing
+    code, out, _ = adb_shell(ip, "[ -x /data/yandex_spotter ] && echo 'OK'")
+    if "OK" not in out:
+        spotter_bin = os.path.join(SCRIPT_DIR, "yandex_spotter")
+        if os.path.exists(spotter_bin):
+            log_fn("  -> Загрузка бинарника yandex_spotter...")
+            adb_cmd(ip, ["push", spotter_bin, "/data/yandex_spotter"])
+            adb_shell(ip, "chmod +x /data/yandex_spotter")
+    
+    # 5. Harden OTA if unlocked
+    code, out, _ = adb_shell(ip, "cat /system/vendor/quasar/ota_script.pub 2>/dev/null")
+    if "DUMMY" not in out and "MIIBCgKCAQEAjQ29h" not in out:
+        log_fn("  -> Применение бетонирования OTA...")
+        apply_hardening(ip, log_fn=log_fn)
+        
+    adb_shell(ip, "sync; mount -o remount,ro /")
+    log_fn("[✓] Авто-исправление завершено!")
+    return True
 
 def diagnose_speaker(ip):
     """Runs full diagnostics on the target device."""
@@ -322,6 +567,16 @@ def install_station_daemon(ip, mode="daemon", log_fn=print):
     """Deploys station_daemon, yandex_spotter, scripts and configs."""
     log_fn(f"[*] Установка Station Daemon на {ip} (режим: {mode})...")
 
+    # 0. Check dependencies automatically
+    log_fn("  -> Автоматическая проверка зависимостей на колонке...")
+    deps = check_speaker_dependencies(ip)
+    for it in deps["items"]:
+        icon = "[✓]" if it["ok"] else ("[X]" if it.get("critical") else "[!]")
+        log_fn(f"     {icon} {it['name']}: {it['status']}")
+    if not deps["critical_ok"]:
+        log_fn("  [!] Обнаружены критические проблемы. Запуск авто-исправления...")
+        auto_fix_dependencies(ip, log_fn=log_fn)
+
     # 1. Check binary
     bin_path = os.path.join(SCRIPT_DIR, "station_daemon", "target", "aarch64-unknown-linux-musl", "release", "station_daemon")
     if not os.path.exists(bin_path):
@@ -353,6 +608,13 @@ def install_station_daemon(ip, mode="daemon", log_fn=print):
                 local_f = os.path.join(station_dir, f)
                 adb_cmd(ip, ["push", local_f, f"/data/{f}"])
         adb_shell(ip, "chmod +x /data/*.sh 2>/dev/null")
+
+    # 4b. Push web dashboard (dist) to /data/station_web
+    dist_dir = os.path.join(SCRIPT_DIR, "dist")
+    if os.path.exists(dist_dir):
+        log_fn("  -> Загрузка актуальной веб-панели управления (/data/station_web)...")
+        adb_shell(ip, "mkdir -p /data/station_web")
+        adb_cmd(ip, ["push", os.path.join(dist_dir, "."), "/data/station_web/"])
 
     # 5. Push config if not present
     code, out, _ = adb_shell(ip, "[ -f /data/config.json ] && echo 'exists'")
@@ -407,7 +669,7 @@ def install_station_daemon(ip, mode="daemon", log_fn=print):
 # ==============================================================================
 
 class WebInstallerHandler(BaseHTTPRequestHandler):
-    target_ip = "192.168.0.105"
+    target_ip = "192.168.0.104"
     logs = []
 
     @classmethod
@@ -426,6 +688,14 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
             self.wfile.write(json.dumps(info).encode("utf-8"))
+            return
+
+        elif path == "/api/dependencies":
+            deps = check_speaker_dependencies(WebInstallerHandler.target_ip)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(deps).encode("utf-8"))
             return
 
         elif path == "/api/logs":
@@ -480,6 +750,16 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
             mode = data.get("mode", "daemon")
             def worker():
                 install_station_daemon(WebInstallerHandler.target_ip, mode=mode, log_fn=WebInstallerHandler.log_msg)
+            threading.Thread(target=worker, daemon=True).start()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": True}).encode("utf-8"))
+            return
+
+        elif path == "/api/fix_dependencies":
+            def worker():
+                auto_fix_dependencies(WebInstallerHandler.target_ip, log_fn=WebInstallerHandler.log_msg)
             threading.Thread(target=worker, daemon=True).start()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -643,7 +923,6 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       height: 420px;
     }
 
-    /* Material Symbols Rounded standard setup */
     .material-symbols-rounded {
       font-family: 'Material Symbols Rounded', sans-serif;
       font-weight: normal;
@@ -728,9 +1007,9 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       display: flex;
       align-items: center;
       gap: 12px;
+      flex-wrap: wrap;
     }
 
-    /* Boykisser Web Panel Chip */
     .m3-chip-panel {
       background: var(--md-sys-color-primary);
       color: var(--md-sys-color-on-primary);
@@ -759,13 +1038,14 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       flex-direction: column;
       gap: 18px;
       position: relative;
-      transition: transform 0.15s ease, background-color 0.15s ease;
     }
 
     .m3-card-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
     }
 
     .m3-card-title {
@@ -942,7 +1222,6 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       gap: 20px;
     }
 
-    /* Action Card Details */
     .m3-action-card {
       justify-content: space-between;
       min-height: 250px;
@@ -953,6 +1232,70 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       flex-direction: column;
       gap: 8px;
       padding-top: 12px;
+    }
+
+    /* Dependencies Grid */
+    .m3-deps-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+    }
+
+    .m3-dep-item {
+      background: #17151b;
+      border-radius: 16px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .m3-dep-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .m3-dep-name {
+      font-size: 0.86rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .m3-dep-badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: var(--md-sys-shape-corner-full);
+      white-space: nowrap;
+    }
+
+    .m3-dep-badge.ok {
+      background: rgba(120, 220, 150, 0.15);
+      color: #78dc96;
+    }
+
+    .m3-dep-badge.warn {
+      background: rgba(248, 192, 87, 0.15);
+      color: #f8c057;
+    }
+
+    .m3-dep-badge.crit {
+      background: rgba(255, 180, 171, 0.15);
+      color: #ffb4ab;
+    }
+
+    .m3-dep-status {
+      font-size: 0.8rem;
+      color: #ffb4c2;
+      font-weight: 600;
+    }
+
+    .m3-dep-desc {
+      font-size: 0.75rem;
+      color: #a49ea8;
+      line-height: 1.4;
     }
 
     /* Telemetry Grid */
@@ -1051,6 +1394,63 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       border-radius: 3px;
     }
 
+    /* Modal Backdrop & Card */
+    .m3-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      padding: 24px;
+      overflow-y: auto;
+    }
+
+    .m3-modal-card {
+      background: #1b1920;
+      border-radius: var(--md-sys-shape-corner-xl);
+      max-width: 820px;
+      width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
+      padding: 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .m3-guide-section {
+      background: #141217;
+      border-radius: 16px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .m3-guide-section h4 {
+      font-size: 1.05rem;
+      color: #ffb4c2;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .m3-guide-section p, .m3-guide-section li {
+      font-size: 0.88rem;
+      color: #c7c2c9;
+      line-height: 1.6;
+    }
+
+    .m3-guide-section ol, .m3-guide-section ul {
+      padding-left: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
     @media (max-width: 768px) {
       .m3-container {
         padding: 20px 16px 40px;
@@ -1100,7 +1500,11 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="m3-top-actions">
-          <a id="btnWebPanel" href="http://192.168.0.105:5000" target="_blank" class="m3-chip-panel" title="Открыть веб-панель управления на колонке">
+          <button onclick="openGuide()" class="m3-btn m3-btn-tonal" title="Открыть подробную инструкцию по использованию">
+            <span class="material-symbols-rounded" style="font-size: 20px;">menu_book</span>
+            <span>Инструкция</span>
+          </button>
+          <a id="btnWebPanel" href="http://192.168.0.104:5000" target="_blank" class="m3-chip-panel" title="Открыть веб-панель управления на колонке">
             <span class="material-symbols-rounded" style="font-size: 20px;">open_in_new</span>
             <span>Панель (5000)</span>
           </a>
@@ -1115,7 +1519,7 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       <div class="m3-conn-bar">
         <div class="m3-conn-left">
           <span style="font-size: 0.84rem; font-weight: 700; color: #a49ea8;">IP Станции:</span>
-          <input type="text" id="targetIp" value="192.168.0.105" class="m3-input" placeholder="192.168.0.XXX">
+          <input type="text" id="targetIp" value="192.168.0.104" class="m3-input" placeholder="192.168.0.XXX">
           <button onclick="setIp()" class="m3-btn m3-btn-tonal" style="padding: 10px 18px;">
             <span>Сохранить</span>
           </button>
@@ -1131,6 +1535,30 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
           <span style="font-size: 0.8rem; font-weight: 600; color: #a49ea8; font-family: var(--md-sys-typescale-mono);">
             Amlogic A113X • yandexmicro
           </span>
+        </div>
+      </div>
+
+      <!-- System Dependencies Section -->
+      <div class="m3-surface-card" id="depsCard">
+        <div class="m3-card-header">
+          <h3 class="m3-card-title">
+            <span class="material-symbols-rounded" style="color: var(--md-sys-color-primary);">fact_check</span>
+            <span>Проверка зависимостей на колонке</span>
+            <span id="depsBadge" class="m3-dep-badge ok" style="display: none;">Все в норме</span>
+          </h3>
+          <div style="display: flex; gap: 8px;">
+            <button onclick="checkDependencies()" class="m3-btn m3-btn-tonal" style="padding: 8px 16px; font-size: 0.82rem;">
+              <span class="material-symbols-rounded" style="font-size: 18px;">sync</span>
+              <span>Проверить зависимости</span>
+            </button>
+            <button onclick="fixDependencies()" class="m3-btn m3-btn-primary" style="padding: 8px 16px; font-size: 0.82rem;">
+              <span class="material-symbols-rounded" style="font-size: 18px;">build</span>
+              <span>Авто-исправление</span>
+            </button>
+          </div>
+        </div>
+        <div id="depsGrid" class="m3-deps-grid">
+          <div style="font-size: 0.84rem; color: #a49ea8; padding: 12px 0;">Нажмите «Проверить зависимости» для диагностики системы колонки...</div>
         </div>
       </div>
 
@@ -1286,7 +1714,111 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
     </div>
   </div>
 
+  <!-- Instruction / User Guide Modal -->
+  <div id="guideModal" class="m3-modal-backdrop" style="display: none;" onclick="closeGuide()">
+    <div class="m3-modal-card" onclick="event.stopPropagation()">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 28px;">menu_book</span>
+          <div>
+            <h3 style="font-size: 1.35rem; font-weight: 700; color: #fff;">Инструкция по использованию</h3>
+            <div style="font-size: 0.8rem; color: #a49ea8;">Яндекс Станция Лайт (yandexmicro) • Station Daemon v2.0</div>
+          </div>
+        </div>
+        <button onclick="closeGuide()" class="m3-btn m3-btn-tonal" style="padding: 8px 14px;">
+          <span class="material-symbols-rounded">close</span>
+        </button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+
+        <div class="m3-guide-section">
+          <h4><span class="material-symbols-rounded">wifi</span> 1. Подключение и поиск колонки в сети</h4>
+          <p>Колонка должна быть подключена к вашей локальной Wi-Fi сети. Установщик автоматически ищет станцию по порту ADB 5555. Если IP не определился автоматически:</p>
+          <ol>
+            <li>Убедитесь, что ваш ПК и колонка находятся в одной Wi-Fi сети.</li>
+            <li>Нажмите иконку лупы <b>«Автопоиск»</b> в панели подключения.</li>
+            <li>Или введите IP-адрес вручную (например, <code>192.168.0.104</code>) и нажмите <b>«Сохранить»</b>.</li>
+          </ol>
+        </div>
+
+        <div class="m3-guide-section">
+          <h4><span class="material-symbols-rounded">fact_check</span> 2. Проверка зависимостей перед установкой</h4>
+          <p>Секция <b>«Проверка зависимостей на колонке»</b> сканирует 11 ключевых параметров системы:</p>
+          <ul>
+            <li><b>Root-доступ (UID 0):</b> необходим для прямого управления звуком и светодиодами.</li>
+            <li><b>Утилиты ALSA и звуковые устройства:</b> требуются для захвата голоса и вывода аудио.</li>
+            <li><b>Микрофонный усилитель PDM Gain:</b> регулирует чувствительность микрофонов (норма 36).</li>
+            <li><b>Свободное место в /data:</b> требуется от 15 МБ для демона и веб-интерфейса.</li>
+            <li><b>Модели споттера «Алиса»:</b> оригинальные нейромодели Яндекса для мгновенной оффлайн-активации.</li>
+          </ul>
+          <p>Если что-то не в порядке, нажмите <b>«Авто-исправление»</b> — установщик сам создаст нужные папки, исправит права и настроит микшер.</p>
+        </div>
+
+        <div class="m3-guide-section">
+          <h4><span class="material-symbols-rounded">rocket_launch</span> 3. Выбор режима установки</h4>
+          <p>Установщик предлагает два варианта развёртывания:</p>
+          <ul>
+            <li><b>Только Station Daemon:</b> колонка сразу после включения загружает кастомный ассистент с нейросетями и веб-панелью. Самый быстрый старт.</li>
+            <li><b>DualBoot (двойная загрузка):</b> при включении колонка 7 секунд мигает кольцевой подсветкой. Если нажать кнопку микрофона во время мигания — запустится оригинальный Квазар (Яндекс.Алиса). Если ничего не нажимать — запустится Station Daemon.</li>
+          </ul>
+        </div>
+
+        <div class="m3-guide-section">
+          <h4><span class="material-symbols-rounded">shield</span> 4. Защита от автообновлений (Бетонирование OTA)</h4>
+          <p>Яндекс регулярно выпускает обновления прошивки, которые могут затереть кастомные файлы и закрыть ADB Root. Функция «Бетонирование OTA» накладывает 3 уровня защиты:</p>
+          <ol>
+            <li>Подменяет открытый ключ проверки обновлений <code>ota_script.pub</code> на фейковый RSA-ключ. Любой официальный OTA-образ будет отклонён системой как повреждённый.</li>
+            <li>Отключает права исполнения для скриптов обновления (chmod 0000).</li>
+            <li>Фиксирует постоянный автозапуск ADB через rootkeeper.</li>
+          </ol>
+        </div>
+
+        <div class="m3-guide-section">
+          <h4><span class="material-symbols-rounded">settings</span> 5. Веб-панель управления на колонке (порт 5000)</h4>
+          <p>После установки откройте веб-интерфейс колонки по адресу <code>http://&lt;IP_колонки&gt;:5000</code>:</p>
+          <ul>
+            <li><b>Вкладка «AI Ассистент»:</b> введите ваш API-ключ DeepSeek, Google Gemini или OpenRouter. Задайте системный промпт (характер и манеру общения ассистента).</li>
+            <li><b>Вкладка «Музыка»:</b> поиск и прямое воспроизведение музыки из YouTube Music, управление громкостью и плейлистами.</li>
+            <li><b>Вкладка «Подсветка LED»:</b> выбор эффектов (радуга, волна, бегущий огонь, дыхание) и яркости кольца.</li>
+            <li><b>Вкладка «Терминал»:</b> веб-консоль ADB shell для быстрого ввода команд на колонке.</li>
+          </ul>
+        </div>
+
+        <div class="m3-guide-section">
+          <h4><span class="material-symbols-rounded">restart_alt</span> 6. Сброс до заводского состояния (Stock Quasar)</h4>
+          <p>Если вам нужно вернуть колонку в первоначальное состояние с заводской Алисой Яндекса:</p>
+          <p>Нажмите <b>«Сбросить в сток + Блок OTA»</b>. Установщик удалит все кастомные файлы из <code>/data</code> и запустит оригинальный сервис Квазара, сохранив при этом блокировку обновлений (колонка не окирпичится) и доступ к ADB.</p>
+        </div>
+
+        <div class="m3-guide-section">
+          <h4><span class="material-symbols-rounded">help</span> 7. Частые вопросы и решение проблем</h4>
+          <ul>
+            <li><b>Колонка не реагирует на слово «Алиса»:</b> проверьте чувствительность микрофонов через кнопку «Авто-исправление» (устанавливает PDM Gain в 36). Также убедитесь, что в микшере не заглушен микрофон.</li>
+            <li><b>Нет звука при ответе:</b> проверьте громкость в веб-панели (порт 5000) и в терминале командой <code>amixer sget Master</code>.</li>
+            <li><b>Сменился IP-адрес колонки:</b> роутер мог переназначить DHCP адрес. Нажмите иконку автопоиска в установщике или привяжите статический IP в настройках вашего роутера.</li>
+          </ul>
+        </div>
+
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; padding-top: 10px;">
+        <button onclick="closeGuide()" class="m3-btn m3-btn-primary" style="padding: 10px 28px;">
+          <span>Понятно, закрыть</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script>
+    function openGuide() {
+      document.getElementById('guideModal').style.display = 'flex';
+    }
+
+    function closeGuide() {
+      document.getElementById('guideModal').style.display = 'none';
+    }
+
     async function checkStatus() {
       try {
         const res = await fetch('/api/status');
@@ -1323,7 +1855,6 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
           document.getElementById('btnWebPanel').href = `http://${data.ip}:5000`;
         }
 
-        // Highlight active boot mode pill
         const mode = data.boot_mode || 'daemon';
         ['pillDaemon', 'pillDualboot', 'pillQuasar'].forEach(id => {
           document.getElementById(id).classList.remove('active');
@@ -1341,6 +1872,48 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       }
     }
 
+    async function checkDependencies() {
+      const grid = document.getElementById('depsGrid');
+      grid.innerHTML = '<div style="font-size: 0.84rem; color: #ffb4c2; padding: 12px 0;">Проверка всех зависимостей на колонке...</div>';
+      try {
+        const res = await fetch('/api/dependencies');
+        const data = await res.json();
+        
+        const badge = document.getElementById('depsBadge');
+        badge.style.display = 'inline-block';
+        if (data.critical_ok) {
+          badge.className = 'm3-dep-badge ok';
+          badge.textContent = 'Критические ОК';
+        } else {
+          badge.className = 'm3-dep-badge crit';
+          badge.textContent = 'Требуется исправление';
+        }
+
+        grid.innerHTML = data.items.map(it => {
+          const badgeClass = it.ok ? 'ok' : (it.critical ? 'crit' : 'warn');
+          const badgeText = it.ok ? 'Норма' : (it.critical ? 'Критично' : 'Внимание');
+          return `
+            <div class="m3-dep-item">
+              <div class="m3-dep-item-header">
+                <span class="m3-dep-name">${it.name}</span>
+                <span class="m3-dep-badge ${badgeClass}">${badgeText}</span>
+              </div>
+              <div class="m3-dep-status">${it.status}</div>
+              <div class="m3-dep-desc">${it.desc}</div>
+            </div>
+          `;
+        }).join('');
+      } catch (e) {
+        grid.innerHTML = `<div style="font-size: 0.84rem; color: #ffb4ab; padding: 12px 0;">Ошибка проверки зависимостей: ${e}</div>`;
+      }
+    }
+
+    async function fixDependencies() {
+      if (!confirm("Запустить автоматическое устранение проблем с зависимостями на колонке?")) return;
+      await fetch('/api/fix_dependencies', { method: 'POST' });
+      setTimeout(checkDependencies, 1200);
+    }
+
     async function setIp() {
       const ip = document.getElementById('targetIp').value.trim();
       if (!ip) return;
@@ -1351,6 +1924,7 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       });
       document.getElementById('btnWebPanel').href = `http://${ip}:5000`;
       checkStatus();
+      checkDependencies();
     }
 
     async function discoverIp() {
@@ -1361,6 +1935,7 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
           document.getElementById('targetIp').value = data.ip;
           document.getElementById('btnWebPanel').href = `http://${data.ip}:5000`;
           checkStatus();
+          checkDependencies();
         }
       } catch (e) {
         console.error(e);
@@ -1414,6 +1989,7 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
     setInterval(pollLogs, 1500);
     setInterval(checkStatus, 5000);
     checkStatus();
+    checkDependencies();
   </script>
 </body>
 </html>"""
@@ -1467,11 +2043,12 @@ def run_tui():
         print(f" {C.WHITE}{C.BOLD}[6]{C.RESET} 🌐 {C.CYAN}{C.BOLD}Запустить браузерный Web GUI{C.RESET} (http://localhost:8080)")
         print(f" {C.WHITE}{C.BOLD}[7]{C.RESET} 💻 Открыть Root Shell (интерактивный ADB консоль)")
         print(f" {C.WHITE}{C.BOLD}[8]{C.RESET} ⚙️ Ввести IP-адрес станции вручную")
+        print(f" {C.WHITE}{C.BOLD}[9]{C.RESET} 🔍 {C.CYAN}{C.BOLD}Проверить все зависимости на колонке{C.RESET}")
         print(f" {C.WHITE}{C.BOLD}[0]{C.RESET} {C.GRAY}Выход{C.RESET}")
         print()
 
         try:
-            choice = input(f"{C.CYAN}Выберите действие (0-8): {C.RESET}").strip()
+            choice = input(f"{C.CYAN}Выберите действие (0-9): {C.RESET}").strip()
         except (KeyboardInterrupt, EOFError):
             print("\nВыход.")
             break
@@ -1534,6 +2111,20 @@ def run_tui():
                 target_ip = new_ip
                 info = diagnose_speaker(target_ip)
 
+        elif choice == "9":
+            print(f"\n{C.CYAN}[*] Проверка зависимостей на колонке {target_ip}...{C.RESET}\n")
+            deps = check_speaker_dependencies(target_ip)
+            for it in deps["items"]:
+                sym = f"{C.GREEN}[✓]{C.RESET}" if it["ok"] else (f"{C.RED}[X]{C.RESET}" if it.get("critical") else f"{C.YELLOW}[!]{C.RESET}")
+                print(f" {sym} {C.BOLD}{it['name']}{C.RESET}: {it['status']}")
+                print(f"     {C.GRAY}{it['desc']}{C.RESET}")
+            print()
+            if not deps["critical_ok"]:
+                fix = input("Запустить автоматическое устранение проблем? (y/N): ").strip().lower()
+                if fix in ["y", "yes", "д", "да"]:
+                    auto_fix_dependencies(target_ip)
+            input("\nНажмите Enter для возврата в меню...")
+
         elif choice == "0":
             print("Выход.")
             break
@@ -1553,6 +2144,10 @@ def main():
     elif "--harden" in sys.argv:
         ip = sys.argv[2] if len(sys.argv) > 2 else discover_speaker_ip()
         apply_hardening(ip)
+    elif "--check-deps" in sys.argv:
+        ip = sys.argv[2] if len(sys.argv) > 2 else discover_speaker_ip()
+        deps = check_speaker_dependencies(ip)
+        print(json.dumps(deps, indent=2, ensure_ascii=False))
     else:
         run_tui()
 

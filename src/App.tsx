@@ -161,7 +161,7 @@ const TAB_WATERMARKS: Record<string, string> = {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'home' | 'music' | 'assistant' | 'led' | 'terminal' | 'settings'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'music' | 'assistant' | 'led' | 'terminal' | 'settings' | 'guide'>('home');
   const [isBoykisserModalOpen, setIsBoykisserModalOpen] = useState(false);
 
   const [config, setConfig] = useState<Config>({});
@@ -1217,6 +1217,18 @@ export default function App() {
               <span className="material-symbols-rounded">settings</span>
             </div>
             <span className="m3-nav-rail-label">settings</span>
+          </button>
+
+          <button 
+            type="button" 
+            className={`m3-nav-rail-item ${activeTab === 'guide' ? 'active' : ''}`}
+            onClick={() => setActiveTab('guide')}
+            title="Инструкция и Справка"
+          >
+            <div className="m3-nav-rail-pill">
+              <span className="material-symbols-rounded">menu_book</span>
+            </div>
+            <span className="m3-nav-rail-label">справка</span>
           </button>
         </div>
       </nav>
@@ -3026,9 +3038,9 @@ export default function App() {
                 <div style={{ fontSize: '0.84rem', color: '#f5edf2', lineHeight: 1.55 }}>
                   Когда сервисы Квазара (<code>maind</code>, <code>quasar_launcher2</code>) отключены или убиты скриптом, прекращается регулярный служебный опрос сетевого интерфейса. По умолчанию в ядре станции для модуля <b>88x2cs</b> включено агрессивное энергосбережение, из-за чего чип RTL8822CS засыпает и станция <b>намертво теряет связь с роутером</b>.<br /><br />
                   <b>ЧТО ОБЯЗАТЕЛЬНО ВЫКЛЮЧИТЬ (УСТАНОВИТЬ В 0):</b><br />
-                  • <b style="color: #ffb4c2;">rtw_power_mgnt = 0</b> — <u>Главное энергосбережение чипа</u> (по умолчанию 2 = Max PS). <b>Обязательно установить в 0</b>, чтобы чип оставался активным 24/7.<br />
-                  • <b style="color: #ffb4c2;">rtw_ips_mode = 0</b> — <u>Inactive Power Saving (IPS)</u> (по умолчанию 1). Отключает засыпание чипа при паузах в передаче данных.<br />
-                  • <b style="color: #ffb4c2;">rtw_smart_ps = 0</b> — <u>Smart Power Saving</u> (по умолчанию 2). Предотвращает задержки и выпадения пинга при стриминге музыки.
+                  • <b style={{ color: '#ffb4c2' }}>rtw_power_mgnt = 0</b> — <u>Главное энергосбережение чипа</u> (по умолчанию 2 = Max PS). <b>Обязательно установить в 0</b>, чтобы чип оставался активным 24/7.<br />
+                  • <b style={{ color: '#ffb4c2' }}>rtw_ips_mode = 0</b> — <u>Inactive Power Saving (IPS)</u> (по умолчанию 1). Отключает засыпание чипа при паузах в передаче данных.<br />
+                  • <b style={{ color: '#ffb4c2' }}>rtw_smart_ps = 0</b> — <u>Smart Power Saving</u> (по умолчанию 2). Предотвращает задержки и выпадения пинга при стриминге музыки.
                 </div>
                 <div style={{ marginTop: '14px' }}>
                   <button
@@ -3252,6 +3264,188 @@ export default function App() {
                   <span className="material-symbols-rounded">save</span>
                   <span>Сохранить всё в config.json</span>
                 </button>
+              </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* ===================== TAB: GUIDE & HELP ===================== */}
+        {activeTab === 'guide' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+            
+            {/* Header Hero Card */}
+            <div className="m3-surface-card" style={{ background: '#1c1a22' }}>
+              <div className="m3-card-header">
+                <div className="m3-card-title">
+                  <span className="material-symbols-rounded" style={{ color: '#ffb4c2', fontSize: '28px' }}>menu_book</span>
+                  <span>Инструкция и руководство по использованию</span>
+                </div>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.8rem', color: '#78dc96', background: 'rgba(120,220,150,0.12)', padding: '5px 14px', borderRadius: '9999px', fontWeight: 700 }}>
+                    Station Daemon v2.0
+                  </span>
+                </div>
+              </div>
+              <p style={{ color: '#c7c2c9', fontSize: '0.92rem', lineHeight: 1.6, margin: 0 }}>
+                Добро пожаловать в центр управления умной колонкой <b>Яндекс Станция Лайт (yandexmicro)</b> на кастомной автономной прошивке.
+                Здесь собраны подробные рекомендации по настройке нейросетей, воспроизведению музыки, работе с подсветкой и устранению неполадок.
+              </p>
+            </div>
+
+            {/* Grid of Sections */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '20px' }}>
+              
+              {/* Card 1: Voice & Wake-word */}
+              <div className="m3-surface-card">
+                <div className="m3-card-title" style={{ fontSize: '1.05rem', color: '#ffb4c2' }}>
+                  <span className="material-symbols-rounded">mic</span>
+                  <span>1. Голосовое общение и вейкворд</span>
+                </div>
+                <div style={{ fontSize: '0.86rem', color: '#c7c2c9', lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div>
+                    Колонка слушает ключевое слово активации <b>«Алиса»</b> полностью оффлайн благодаря аппаратному DSP Amlogic и нативным библиотекам споттера Яндекса.
+                  </div>
+                  <div style={{ background: '#16141a', padding: '12px 14px', borderRadius: '12px' }}>
+                    <div style={{ fontWeight: 700, color: '#fff', marginBottom: '4px' }}>Световая индикация состояний:</div>
+                    <ul style={{ paddingLeft: '18px', margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <li><b style={{ color: '#ffb4c2' }}>Фиолетовый пульс:</b> колонка услышала «Алиса» и записывает ваш вопрос.</li>
+                      <li><b style={{ color: '#78dc96' }}>Синее вращение:</b> голос передан в распознавание (STT) и запрос отправлен в LLM.</li>
+                      <li><b style={{ color: '#fff' }}>Белое сияние:</b> колонка воспроизводит синтезированный ответ через динамик.</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <b>Примеры запросов:</b> «Алиса, какая погода на Марсе?», «Алиса, расскажи короткую шутку», «Алиса, включи музыку рок», «Алиса, кто тебя создал?».
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 2: AI & LLM Providers */}
+              <div className="m3-surface-card">
+                <div className="m3-card-title" style={{ fontSize: '1.05rem', color: '#ffb4c2' }}>
+                  <span className="material-symbols-rounded">auto_awesome</span>
+                  <span>2. Нейросети (LLM) и Характер</span>
+                </div>
+                <div style={{ fontSize: '0.86rem', color: '#c7c2c9', lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div>
+                    Во вкладке <b>«AI Ассистент»</b> настраивается интеллект колонки. Доступны прямые интеграции со всеми ведущими провайдерами:
+                  </div>
+                  <ul style={{ paddingLeft: '18px', margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <li><b>DeepSeek (Рекомендуется):</b> модели <code>deepseek-chat</code> и <code>deepseek-reasoner</code>. Наилучшее понимание русского языка и очень доступная цена.</li>
+                    <li><b>Google Gemini:</b> модели <code>gemini-1.5-flash</code>. Мгновенная скорость генерации.</li>
+                    <li><b>OpenRouter:</b> агрегатор 100+ нейросетей (Claude, Llama 3, Mistral, Qwen).</li>
+                    <li><b>Groq:</b> сверхбыстрый вывод моделей Llama 3 с задержкой ответа менее 0.5 сек.</li>
+                  </ul>
+                  <div style={{ background: '#16141a', padding: '12px 14px', borderRadius: '12px' }}>
+                    <b>Системный промпт:</b> позволяет задать характер ассистента, имя, чувство юмора и краткость ответов (рекомендуется ограничение в 2-3 предложения для комфортного прослушивания).
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 3: Music Player */}
+              <div className="m3-surface-card">
+                <div className="m3-card-title" style={{ fontSize: '1.05rem', color: '#ffb4c2' }}>
+                  <span className="material-symbols-rounded">music_note</span>
+                  <span>3. Музыка и Радиостанции</span>
+                </div>
+                <div style={{ fontSize: '0.86rem', color: '#c7c2c9', lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div>
+                    Во вкладке <b>«Музыка»</b> доступен полноценный плеер:
+                  </div>
+                  <ul style={{ paddingLeft: '18px', margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <li><b>YouTube Music:</b> глобальный поиск по артистам, альбомам и трекам с прямым аудиопотоком.</li>
+                    <li><b>Подключение аккаунта:</b> через кнопку «Подключить аккаунт» можно вставить Cookie для доступа к вашим персональным плейлистам и «Моему супермиксу».</li>
+                    <li><b>Радиопотоки:</b> онлайн-радиостанции без рекламы.</li>
+                  </ul>
+                  <div style={{ background: '#16141a', padding: '12px 14px', borderRadius: '12px' }}>
+                    <b>Голосовая команда:</b> «Алиса, включи [название трека / исполнитель]» сразу запускает воспроизведение первого найденного трека.
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 4: LED Ring */}
+              <div className="m3-surface-card">
+                <div className="m3-card-title" style={{ fontSize: '1.05rem', color: '#ffb4c2' }}>
+                  <span className="material-symbols-rounded">palette</span>
+                  <span>4. Подсветка LED (Кольцо)</span>
+                </div>
+                <div style={{ fontSize: '0.86rem', color: '#c7c2c9', lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div>
+                    На плате Станции Лайт установлены 4 аппаратных RGB светодиода. Во вкладке <b>«Подсветка LED»</b> можно:
+                  </div>
+                  <ul style={{ paddingLeft: '18px', margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <li>Выбирать готовые эффекты: <i>Радуга</i>, <i>Бегущий огонь</i>, <i>Волна</i>, <i>Дыхание</i>.</li>
+                    <li>Устанавливать статический цвет из палитры Material Design 3.</li>
+                    <li>Регулировать яркость светодиодов от 0 до 100% (ночной режим).</li>
+                    <li>Включать светомузыку, реагирующую на громкость звука.</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Card 5: DualBoot System */}
+              <div className="m3-surface-card">
+                <div className="m3-card-title" style={{ fontSize: '1.05rem', color: '#ffb4c2' }}>
+                  <span className="material-symbols-rounded">alt_route</span>
+                  <span>5. Режим двойной загрузки (DualBoot)</span>
+                </div>
+                <div style={{ fontSize: '0.86rem', color: '#c7c2c9', lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div>
+                    Система <b>DualBoot</b> позволяет в любой момент использовать как кастомный Station Daemon, так и оригинальную Алису от Яндекса:
+                  </div>
+                  <ol style={{ paddingLeft: '18px', margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <li>При включении питания светодиоды мигают в течение <b>7 секунд</b>.</li>
+                    <li>Если нажать физическую кнопку микрофона во время мигания — запустится <b>заводской Квазар</b>.</li>
+                    <li>Если ничего не нажимать — колонка продолжит загрузку в <b>Station Daemon</b>.</li>
+                  </ol>
+                  <div style={{ background: '#16141a', padding: '12px 14px', borderRadius: '12px' }}>
+                    Режим по умолчанию можно переключить на главной странице веб-панели или файлом <code>/data/dualboot_mode</code> (значения: <code>daemon</code>, <code>dualboot</code>, <code>quasar</code>).
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 6: Terminal & Security */}
+              <div className="m3-surface-card">
+                <div className="m3-card-title" style={{ fontSize: '1.05rem', color: '#ffb4c2' }}>
+                  <span className="material-symbols-rounded">shield</span>
+                  <span>6. Безопасность и Терминал ADB</span>
+                </div>
+                <div style={{ fontSize: '0.86rem', color: '#c7c2c9', lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div>
+                    Во вкладке <b>«Терминал»</b> доступна прямая интерактивная командная строка Root Shell для диагностики колонки:
+                  </div>
+                  <ul style={{ paddingLeft: '18px', margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <li><code>free -m</code> — проверка свободной оперативной памяти RAM (из 244 МБ).</li>
+                    <li><code>df -h /data</code> — проверка свободного места на флеш-памяти.</li>
+                    <li><code>amixer sget 'PDM Gain'</code> — проверка уровня усиления микрофонов.</li>
+                    <li><code>ps</code> — список всех активных системных процессов.</li>
+                  </ul>
+                  <div style={{ background: '#16141a', padding: '12px 14px', borderRadius: '12px', color: '#ffb4ab' }}>
+                    <b>Внимание:</b> Блокировка автообновлений (Anti-OTA) защищает колонку от отката в закрытую прошивку Яндекса. Не удаляйте файл <code>/system/vendor/quasar/ota_script.pub</code>!
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Troubleshooting / FAQ Card */}
+            <div className="m3-surface-card" style={{ background: '#18161c' }}>
+              <div className="m3-card-title" style={{ fontSize: '1.1rem', color: '#fff' }}>
+                <span className="material-symbols-rounded" style={{ color: '#f8c057' }}>help</span>
+                <span>Часто задаваемые вопросы (F.A.Q.) и решение проблем</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px', fontSize: '0.86rem', color: '#c7c2c9', marginTop: '8px' }}>
+                <div style={{ background: '#121115', padding: '16px', borderRadius: '14px' }}>
+                  <div style={{ fontWeight: 700, color: '#ffb4c2', marginBottom: '6px' }}>Колонка не слышит ключевое слово:</div>
+                  <div>Убедитесь, что кнопка отключения микрофонов на корпусе не нажата (красный индикатор не горит). В терминале введите команду <code>amixer sset 'PDM Gain' 36</code> для установки оптимального усиления.</div>
+                </div>
+                <div style={{ background: '#121115', padding: '16px', borderRadius: '14px' }}>
+                  <div style={{ fontWeight: 700, color: '#ffb4c2', marginBottom: '6px' }}>Ошибка генерации ответа LLM:</div>
+                  <div>Проверьте правильность введённого API-ключа и положительный баланс в личном кабинете провайдера (DeepSeek / Gemini / OpenRouter). Также проверьте доступность интернета командой <code>ping 1.1.1.1</code>.</div>
+                </div>
+                <div style={{ background: '#121115', padding: '16px', borderRadius: '14px' }}>
+                  <div style={{ fontWeight: 700, color: '#ffb4c2', marginBottom: '6px' }}>Как полностью вернуться в заводскую Алису?</div>
+                  <div>Запустите Web-установщик на компьютере (порт 8080) и нажмите кнопку «Сбросить в сток + Блок OTA». Колонка вернётся к заводскому поведению без потери Root и защиты от блокировки.</div>
+                </div>
               </div>
             </div>
 
