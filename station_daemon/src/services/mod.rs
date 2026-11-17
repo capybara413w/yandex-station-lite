@@ -14,6 +14,7 @@ pub mod weather;
 pub mod ytmusic;
 pub mod soundpack;
 pub mod streaming_sink;
+pub mod dns;
 
 pub use chat::{ChatMessageItem, ChatService, ChatSession, ChatSessionSummary};
 pub use clients::{

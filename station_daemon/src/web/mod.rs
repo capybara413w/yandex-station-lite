@@ -183,6 +183,9 @@ pub fn create_router(state: AppState) -> Router {
             "/api/config/assistant",
             get(get_assistant_config_handler).post(post_assistant_config_handler),
         )
+        // DNS Management
+        .route("/api/dns/status", get(get_dns_status_handler))
+        .route("/api/dns/test", post(test_dns_handler))
         // Logs
         .route("/api/logs", get(get_logs_handler))
         .route("/api/logs/system", get(get_logs_handler))
@@ -1790,6 +1793,43 @@ async fn get_config_handler(State(state): State<AppState>) -> impl IntoResponse 
     Json(cfg)
 }
 
+#[derive(Deserialize)]
+struct TestDnsRequest {
+    #[serde(default)]
+    host: Option<String>,
+}
+
+async fn get_dns_status_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let cfg = state.config.read().await;
+    let active_nameservers = crate::services::dns::get_active_nameservers().await;
+    Json(serde_json::json!({
+        "custom_enabled": cfg.dns.custom_enabled,
+        "provider": cfg.dns.provider,
+        "primary_dns": cfg.dns.primary_dns,
+        "secondary_dns": cfg.dns.secondary_dns,
+        "active_nameservers": active_nameservers,
+    }))
+}
+
+async fn test_dns_handler(Json(payload): Json<TestDnsRequest>) -> impl IntoResponse {
+    let host = payload.host.as_deref().unwrap_or("cloudflare.com");
+    match crate::services::dns::test_dns_resolution(host).await {
+        Ok((ip, latency_ms)) => Json(serde_json::json!({
+            "success": true,
+            "host": host,
+            "resolved_ip": ip,
+            "latency_ms": latency_ms,
+            "message": format!("Успешно разрешено: {} -> {} ({} мс)", host, ip, latency_ms)
+        })),
+        Err(e) => Json(serde_json::json!({
+            "success": false,
+            "host": host,
+            "error": e,
+            "message": format!("Ошибка разрешения: {}", e)
+        })),
+    }
+}
+
 async fn get_assistant_config_handler(State(state): State<AppState>) -> impl IntoResponse {
     let cfg = state.config.read().await;
 
@@ -2464,6 +2504,14 @@ struct UpdateConfigRequest {
     #[serde(default)]
     socks5_url: Option<String>,
     #[serde(default)]
+    dns_custom_enabled: Option<bool>,
+    #[serde(default)]
+    dns_provider: Option<String>,
+    #[serde(default)]
+    dns_primary: Option<String>,
+    #[serde(default)]
+    dns_secondary: Option<String>,
+    #[serde(default)]
     cloudflare_llm_account_id: Option<String>,
     #[serde(default)]
     cloudflare_llm_api_token: Option<String>,
@@ -2826,6 +2874,29 @@ async fn post_config_handler(
             cfg.proxy.socks5_url = trimmed;
         }
     }
+    if let Some(d_en) = payload.dns_custom_enabled {
+        cfg.dns.custom_enabled = d_en;
+    }
+    if let Some(prov) = payload.dns_provider {
+        if !prov.trim().is_empty() {
+            cfg.dns.provider = prov.trim().to_string();
+        }
+    }
+    if let Some(prim) = payload.dns_primary {
+        let trimmed = prim.trim().to_string();
+        if !trimmed.is_empty() {
+            cfg.dns.primary_dns = trimmed;
+        }
+    }
+    if let Some(sec) = payload.dns_secondary {
+        let trimmed = sec.trim().to_string();
+        if !trimmed.is_empty() {
+            cfg.dns.secondary_dns = trimmed;
+        }
+    }
+
+    // Apply DNS changes to system
+    let _ = crate::services::dns::apply_dns(&cfg.dns).await;
 
     // Save to /data/config.json if path exists, otherwise config.json
     let save_path = if Path::new("/data").exists() {

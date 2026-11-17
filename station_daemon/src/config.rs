@@ -262,6 +262,41 @@ fn default_proxy_url() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DnsConfig {
+    #[serde(default)]
+    pub custom_enabled: bool,
+    #[serde(default = "default_dns_provider")]
+    pub provider: String,
+    #[serde(default = "default_primary_dns")]
+    pub primary_dns: String,
+    #[serde(default = "default_secondary_dns")]
+    pub secondary_dns: String,
+}
+
+fn default_dns_provider() -> String {
+    "system".to_string()
+}
+
+fn default_primary_dns() -> String {
+    "1.1.1.1".to_string()
+}
+
+fn default_secondary_dns() -> String {
+    "8.8.8.8".to_string()
+}
+
+impl Default for DnsConfig {
+    fn default() -> Self {
+        Self {
+            custom_enabled: false,
+            provider: default_dns_provider(),
+            primary_dns: default_primary_dns(),
+            secondary_dns: default_secondary_dns(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioConfig {
     #[serde(default = "default_volume")]
     pub initial_volume: u8,
@@ -716,6 +751,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub tts: TtsConfig,
     pub proxy: ProxyConfig,
+    #[serde(default)]
+    pub dns: DnsConfig,
     pub audio: AudioConfig,
     pub hardware: HardwareConfig,
     #[serde(default)]
@@ -745,6 +782,7 @@ impl Default for AppConfig {
                 enabled: false,
                 socks5_url: default_proxy_url(),
             },
+            dns: DnsConfig::default(),
             audio: AudioConfig {
                 initial_volume: default_volume(),
                 mixer_control_name: default_mixer(),

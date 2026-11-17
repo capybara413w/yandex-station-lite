@@ -89,6 +89,20 @@ interface Config {
   stt_extra_payload?: any;
   socks5_enabled?: boolean;
   socks5_url?: string;
+  proxy?: {
+    enabled?: boolean;
+    socks5_url?: string;
+  };
+  dns?: {
+    custom_enabled?: boolean;
+    provider?: string;
+    primary_dns?: string;
+    secondary_dns?: string;
+  };
+  dns_custom_enabled?: boolean;
+  dns_provider?: string;
+  dns_primary?: string;
+  dns_secondary?: string;
   homeassistant?: {
     enabled?: boolean;
     url?: string;
@@ -316,8 +330,16 @@ export default function App() {
   const [cartesiaTtsVoiceIdInput, setCartesiaTtsVoiceIdInput] = useState('a0e998e3-182d-4f0d-9fb9-e82429f3303a');
   const [customTtsUrlInput, setCustomTtsUrlInput] = useState('');
 
-  // SOCKS5 Proxy Toggle state
+  // SOCKS5 / VPN Proxy & DNS states
   const [socks5EnabledInput, setSocks5EnabledInput] = useState(false);
+  const [socks5UrlInput, setSocks5UrlInput] = useState('socks5://127.0.0.1:1080');
+  const [dnsCustomEnabledInput, setDnsCustomEnabledInput] = useState(false);
+  const [dnsProviderInput, setDnsProviderInput] = useState('system');
+  const [dnsPrimaryInput, setDnsPrimaryInput] = useState('1.1.1.1');
+  const [dnsSecondaryInput, setDnsSecondaryInput] = useState('8.8.8.8');
+  const [dnsActiveServers, setDnsActiveServers] = useState<string[]>([]);
+  const [dnsTesting, setDnsTesting] = useState(false);
+  const [dnsTestResult, setDnsTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [visualizerEnabledInput, setVisualizerEnabledInput] = useState(true);
 
   // Music & Multi-Source Search state (YouTube Music, SoundCloud, Radio)
@@ -447,6 +469,70 @@ export default function App() {
   const [hassVoiceResult, setHassVoiceResult] = useState<string | null>(null);
   const [hassVoiceTesting, setHassVoiceTesting] = useState(false);
   const [hassShowToken, setHassShowToken] = useState(false);
+
+  const fetchDnsStatus = async () => {
+    try {
+      const res = await fetch('/api/dns/status');
+      if (res.ok) {
+        const d = await res.json();
+        if (Array.isArray(d.active_nameservers)) {
+          setDnsActiveServers(d.active_nameservers);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleSelectDnsPreset = (preset: string) => {
+    setDnsProviderInput(preset);
+    if (preset === 'system') {
+      setDnsCustomEnabledInput(false);
+    } else {
+      setDnsCustomEnabledInput(true);
+      if (preset === 'cloudflare') {
+        setDnsPrimaryInput('1.1.1.1');
+        setDnsSecondaryInput('1.0.0.1');
+      } else if (preset === 'google') {
+        setDnsPrimaryInput('8.8.8.8');
+        setDnsSecondaryInput('8.8.4.4');
+      } else if (preset === 'adguard') {
+        setDnsPrimaryInput('94.140.14.14');
+        setDnsSecondaryInput('94.140.15.15');
+      } else if (preset === 'yandex') {
+        setDnsPrimaryInput('77.88.8.8');
+        setDnsSecondaryInput('77.88.8.1');
+      } else if (preset === 'quad9') {
+        setDnsPrimaryInput('9.9.9.9');
+        setDnsSecondaryInput('149.112.112.112');
+      }
+    }
+  };
+
+  const handleTestDns = async (testHost = 'cloudflare.com') => {
+    setDnsTesting(true);
+    setDnsTestResult(null);
+    try {
+      const res = await fetch('/api/dns/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: testHost }),
+      });
+      const d = await res.json();
+      setDnsTestResult({
+        success: !!d.success,
+        message: d.message || (d.success ? 'Успешно' : 'Ошибка'),
+      });
+      fetchDnsStatus();
+    } catch (e: any) {
+      setDnsTestResult({
+        success: false,
+        message: 'Ошибка подключения: ' + String(e),
+      });
+    } finally {
+      setDnsTesting(false);
+    }
+  };
 
   const fetchWifiStatus = async () => {
     try {
@@ -776,6 +862,15 @@ export default function App() {
         if (data.custom_tts_url) setCustomTtsUrlInput(data.custom_tts_url);
         if (data.station_ip) setStationIpInput(data.station_ip);
         if (data.socks5_enabled !== undefined) setSocks5EnabledInput(!!data.socks5_enabled);
+        if (data.proxy?.enabled !== undefined) setSocks5EnabledInput(!!data.proxy.enabled);
+        if (data.socks5_url) setSocks5UrlInput(data.socks5_url);
+        if (data.proxy?.socks5_url) setSocks5UrlInput(data.proxy.socks5_url);
+        if (data.dns) {
+          if (data.dns.custom_enabled !== undefined) setDnsCustomEnabledInput(!!data.dns.custom_enabled);
+          if (data.dns.provider) setDnsProviderInput(data.dns.provider);
+          if (data.dns.primary_dns) setDnsPrimaryInput(data.dns.primary_dns);
+          if (data.dns.secondary_dns) setDnsSecondaryInput(data.dns.secondary_dns);
+        }
         if (data.homeassistant) {
           if (data.homeassistant.enabled !== undefined) setHassEnabledInput(data.homeassistant.enabled);
           if (data.homeassistant.url) setHassUrlInput(data.homeassistant.url);
@@ -1012,6 +1107,7 @@ export default function App() {
     fetchAlarms();
     fetchStreamingStatus();
     fetchSoundPacks();
+    fetchDnsStatus();
 
     const timer = setInterval(() => {
       fetchPlayerStatus();
@@ -1035,6 +1131,7 @@ export default function App() {
     } else if (activeTab === 'music' || activeTab === 'settings') {
       fetchStreamingStatus();
       fetchSoundPacks();
+    fetchDnsStatus();
     }
   }, [activeTab]);
 
@@ -1430,6 +1527,13 @@ export default function App() {
       cartesia_tts_voice_id: cartesiaTtsVoiceIdInput.trim(),
       custom_tts_url: customTtsUrlInput.trim(),
       socks5_enabled: socks5EnabledInput,
+      socks5_url: socks5UrlInput.trim(),
+      proxy_enabled: socks5EnabledInput,
+      proxy_socks5_url: socks5UrlInput.trim(),
+      dns_custom_enabled: dnsCustomEnabledInput,
+      dns_provider: dnsProviderInput,
+      dns_primary: dnsPrimaryInput.trim(),
+      dns_secondary: dnsSecondaryInput.trim(),
       homeassistant: config.homeassistant || {
         enabled: hassEnabledInput,
         url: hassUrlInput.trim(),
@@ -1933,51 +2037,79 @@ export default function App() {
                   </div>
 
                   {/* 3. Toggles (Slightly lighter #3a3246) */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '14px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '14px' }}>
                     <button
                       type="button"
                       style={{
-                        padding: '10px 12px',
+                        padding: '10px 8px',
                         borderRadius: '12px',
                         border: 'none',
                         background: socks5EnabledInput ? '#3a3246' : 'rgba(58, 50, 70, 0.24)',
                         color: socks5EnabledInput ? '#ffb4c2' : '#370014',
                         fontWeight: 700,
-                        fontSize: '0.78rem',
+                        fontSize: '0.74rem',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        gap: '6px',
+                        gap: '5px',
                         transition: 'all 0.15s ease',
                       }}
                       onClick={() => setSocks5EnabledInput(!socks5EnabledInput)}
                     >
-                      <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>vpn_lock</span>
+                      <span className="material-symbols-rounded" style={{ fontSize: '17px' }}>vpn_lock</span>
                       <span>SOCKS5: {socks5EnabledInput ? 'ВКЛ' : 'ВЫКЛ'}</span>
                     </button>
 
                     <button
                       type="button"
                       style={{
-                        padding: '10px 12px',
+                        padding: '10px 8px',
+                        borderRadius: '12px',
+                        border: 'none',
+                        background: dnsCustomEnabledInput ? '#3a3246' : 'rgba(58, 50, 70, 0.24)',
+                        color: dnsCustomEnabledInput ? '#ffb4c2' : '#370014',
+                        fontWeight: 700,
+                        fontSize: '0.74rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '5px',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onClick={() => {
+                        const next = !dnsCustomEnabledInput;
+                        setDnsCustomEnabledInput(next);
+                        if (!next) setDnsProviderInput('system');
+                        else if (dnsProviderInput === 'system') setDnsProviderInput('cloudflare');
+                      }}
+                    >
+                      <span className="material-symbols-rounded" style={{ fontSize: '17px' }}>dns</span>
+                      <span>DNS: {dnsCustomEnabledInput ? 'СВОЙ' : 'DHCP'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      style={{
+                        padding: '10px 8px',
                         borderRadius: '12px',
                         border: 'none',
                         background: visualizerEnabledInput ? '#3a3246' : 'rgba(58, 50, 70, 0.24)',
                         color: visualizerEnabledInput ? '#ffb4c2' : '#370014',
                         fontWeight: 700,
-                        fontSize: '0.78rem',
+                        fontSize: '0.74rem',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        gap: '6px',
+                        gap: '5px',
                         transition: 'all 0.15s ease',
                       }}
                       onClick={handleToggleVisualizer}
                     >
-                      <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>equalizer</span>
-                      <span>Светомузыка: {visualizerEnabledInput ? 'ВКЛ' : 'ВЫКЛ'}</span>
+                      <span className="material-symbols-rounded" style={{ fontSize: '17px' }}>equalizer</span>
+                      <span>Свет: {visualizerEnabledInput ? 'ВКЛ' : 'ВЫКЛ'}</span>
                     </button>
                   </div>
                 </div>
@@ -5062,6 +5194,248 @@ data:
                     </div>
                   );
                 })}
+              </div>
+            </div>
+
+            {/* VPN / SOCKS5 Proxy & DNS Settings Card */}
+            <div className="m3-surface-card">
+              <div className="m3-card-header" style={{ flexWrap: 'wrap', gap: '12px' }}>
+                <div className="m3-card-title">
+                  <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>vpn_lock</span>
+                  <span>Сетевой прокси (VPN / SOCKS5) и DNS</span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button type="button" className="m3-btn m3-btn-tonal" onClick={fetchDnsStatus}>
+                    <span className="material-symbols-rounded">refresh</span>
+                    <span>Обновить DNS</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Sub-section 1: VPN / SOCKS5 Proxy */}
+              <div style={{ background: '#17151a', borderRadius: '16px', padding: '16px', marginBottom: '18px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="material-symbols-rounded" style={{ color: '#ffb4c2', fontSize: '20px' }}>vpn_key</span>
+                    <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.95rem' }}>SOCKS5 Прокси / VPN туннель</span>
+                  </div>
+                  <span
+                    className="m3-badge"
+                    style={{
+                      background: socks5EnabledInput ? 'rgba(120, 220, 150, 0.2)' : 'rgba(255, 78, 69, 0.2)',
+                      color: socks5EnabledInput ? '#78dc96' : '#ff5252',
+                      fontSize: '0.78rem',
+                      padding: '4px 10px',
+                    }}
+                  >
+                    {socks5EnabledInput ? 'ПРОКСИ ВКЛЮЧЕН' : 'ОТКЛЮЧЕН'}
+                  </span>
+                </div>
+
+                <div style={{ fontSize: '0.8rem', color: '#c7c2c9', lineHeight: 1.45, marginBottom: '12px' }}>
+                  Используется для обхода региональных блокировок при воспроизведении музыки (SoundCloud, интернет-радио) и обращении к зарубежным облачным сервисам (Cloudflare, OpenRouter, ElevenLabs). Встроенный локальный HTTP-мост на порту 8889 автоматически перенаправляет запросы через указанный SOCKS5 адрес.
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '10px', alignItems: 'center', marginBottom: '10px' }}>
+                  <button
+                    type="button"
+                    className="m3-btn"
+                    style={{
+                      background: socks5EnabledInput ? '#ffb4c2' : 'rgba(255, 180, 194, 0.12)',
+                      color: socks5EnabledInput ? '#000' : '#ffb4c2',
+                      fontWeight: 700,
+                      padding: '10px 16px',
+                    }}
+                    onClick={() => setSocks5EnabledInput(!socks5EnabledInput)}
+                  >
+                    <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>
+                      {socks5EnabledInput ? 'check_circle' : 'power_settings_new'}
+                    </span>
+                    <span>{socks5EnabledInput ? 'Включен' : 'Включить SOCKS5'}</span>
+                  </button>
+
+                  <input
+                    type="text"
+                    className="m3-input"
+                    placeholder="socks5://127.0.0.1:1080 или socks5://user:pass@192.168.0.1:1080"
+                    value={socks5UrlInput}
+                    onChange={(e) => setSocks5UrlInput(e.target.value)}
+                  />
+                </div>
+
+                {/* Preset Chips */}
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.72rem', color: '#8e8893' }}>Быстрые пресеты:</span>
+                  {[
+                    { label: 'Localhost (127.0.0.1:1080)', url: 'socks5://127.0.0.1:1080' },
+                    { label: 'Хост ПК (192.168.0.104:1080)', url: 'socks5://192.168.0.104:1080' },
+                    { label: 'Роутер (192.168.0.1:1080)', url: 'socks5://192.168.0.1:1080' },
+                  ].map((p) => (
+                    <button
+                      key={p.url}
+                      type="button"
+                      className="m3-btn m3-btn-outlined"
+                      style={{ fontSize: '0.72rem', padding: '3px 8px' }}
+                      onClick={() => setSocks5UrlInput(p.url)}
+                    >
+                      <span>{p.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Sub-section 2: DNS Settings */}
+              <div style={{ background: '#17151a', borderRadius: '16px', padding: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="material-symbols-rounded" style={{ color: '#ffb4c2', fontSize: '20px' }}>dns</span>
+                    <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.95rem' }}>Настройка DNS серверов станции</span>
+                  </div>
+                  <span
+                    className="m3-badge"
+                    style={{
+                      background: dnsCustomEnabledInput ? 'rgba(120, 220, 150, 0.2)' : 'rgba(58, 50, 70, 0.4)',
+                      color: dnsCustomEnabledInput ? '#78dc96' : '#c7c2c9',
+                      fontSize: '0.78rem',
+                      padding: '4px 10px',
+                    }}
+                  >
+                    {dnsCustomEnabledInput ? 'ПОЛЬЗОВАТЕЛЬСКИЙ DNS' : 'СИСТЕМНЫЙ (DHCP / Unbound)'}
+                  </span>
+                </div>
+
+                <div style={{ fontSize: '0.8rem', color: '#c7c2c9', lineHeight: 1.45, marginBottom: '14px' }}>
+                  Позволяет станции разрешать имена через доверенные или быстрые DNS серверы в обход DNS-серверов провайдера. Конфигурация сохраняется в <code>/data/resolv.conf.head</code> и не сбрасывается при перезагрузке станции или обновлении DHCP аренды.
+                </div>
+
+                {/* Active Nameservers Box */}
+                <div style={{ background: '#100e13', borderRadius: '12px', padding: '10px 14px', marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#8e8893' }}>
+                    Текущие активные DNS в ОС:
+                    <b style={{ color: '#ffb4c2', marginLeft: '6px', fontFamily: 'monospace' }}>
+                      {dnsActiveServers.length > 0 ? dnsActiveServers.join(', ') : '127.0.0.1 (Unbound Caching Resolver)'}
+                    </b>
+                  </div>
+                  <button
+                    type="button"
+                    className="m3-btn m3-btn-outlined"
+                    style={{ fontSize: '0.72rem', padding: '4px 10px' }}
+                    onClick={() => handleTestDns()}
+                    disabled={dnsTesting}
+                  >
+                    <span className="material-symbols-rounded" style={{ fontSize: '14px' }}>speed</span>
+                    <span>{dnsTesting ? 'Проверка...' : 'Проверить резолв'}</span>
+                  </button>
+                </div>
+
+                {dnsTestResult && (
+                  <div
+                    style={{
+                      background: dnsTestResult.success ? 'rgba(120, 220, 150, 0.12)' : 'rgba(255, 78, 69, 0.12)',
+                      borderLeft: `4px solid ${dnsTestResult.success ? '#78dc96' : '#ff5252'}`,
+                      borderRadius: '8px',
+                      padding: '8px 12px',
+                      fontSize: '0.78rem',
+                      color: dnsTestResult.success ? '#78dc96' : '#ff8080',
+                      marginBottom: '14px',
+                    }}
+                  >
+                    {dnsTestResult.message}
+                  </div>
+                )}
+
+                {/* DNS Provider Selector */}
+                <div style={{ marginBottom: '14px' }}>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#8e8893', display: 'block', marginBottom: '6px' }}>
+                    Провайдер DNS (Пресеты):
+                  </label>
+                  <select
+                    className="m3-quick-select"
+                    value={dnsProviderInput}
+                    onChange={(e) => handleSelectDnsPreset(e.target.value)}
+                  >
+                    <option value="system">Системный (По умолчанию от роутера / DHCP / Unbound)</option>
+                    <option value="cloudflare">Cloudflare (1.1.1.1, 1.0.0.1) — Быстрый, защита приватности</option>
+                    <option value="google">Google Public DNS (8.8.8.8, 8.8.4.4) — Глобальный стандарт</option>
+                    <option value="adguard">AdGuard DNS (94.140.14.14, 94.140.15.15) — Блокировка рекламы</option>
+                    <option value="yandex">Яндекс DNS (77.88.8.8, 77.88.8.1) — Быстрый в РФ</option>
+                    <option value="quad9">Quad9 (9.9.9.9, 149.112.112.112) — Защита от вредоносных сайтов</option>
+                    <option value="custom">Пользовательский (Ручной ввод IP адресов)</option>
+                  </select>
+                </div>
+
+                {/* Primary & Secondary IP Inputs */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginBottom: '14px' }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#8e8893', display: 'block', marginBottom: '4px' }}>
+                      Основной DNS (Primary):
+                    </label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="1.1.1.1"
+                      value={dnsPrimaryInput}
+                      onChange={(e) => {
+                        setDnsPrimaryInput(e.target.value);
+                        setDnsProviderInput('custom');
+                        setDnsCustomEnabledInput(true);
+                      }}
+                      disabled={!dnsCustomEnabledInput && dnsProviderInput === 'system'}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#8e8893', display: 'block', marginBottom: '4px' }}>
+                      Резервный DNS (Secondary):
+                    </label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="8.8.8.8"
+                      value={dnsSecondaryInput}
+                      onChange={(e) => {
+                        setDnsSecondaryInput(e.target.value);
+                        setDnsProviderInput('custom');
+                        setDnsCustomEnabledInput(true);
+                      }}
+                      disabled={!dnsCustomEnabledInput && dnsProviderInput === 'system'}
+                    />
+                  </div>
+                </div>
+
+                {/* DNS Toggle & Save Button */}
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="m3-btn"
+                    style={{
+                      background: dnsCustomEnabledInput ? '#ffb4c2' : 'rgba(255, 180, 194, 0.12)',
+                      color: dnsCustomEnabledInput ? '#000' : '#ffb4c2',
+                      fontWeight: 700,
+                      padding: '8px 16px',
+                    }}
+                    onClick={() => {
+                      const next = !dnsCustomEnabledInput;
+                      setDnsCustomEnabledInput(next);
+                      if (!next) setDnsProviderInput('system');
+                      else if (dnsProviderInput === 'system') setDnsProviderInput('cloudflare');
+                    }}
+                  >
+                    <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>
+                      {dnsCustomEnabledInput ? 'check_circle' : 'tune'}
+                    </span>
+                    <span>{dnsCustomEnabledInput ? 'Свой DNS активен' : 'Использовать свой DNS'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="m3-btn m3-btn-primary"
+                    style={{ padding: '8px 18px', fontWeight: 700 }}
+                    onClick={handleSaveSettings}
+                  >
+                    <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>save</span>
+                    <span>Применить прокси и DNS</span>
+                  </button>
+                </div>
               </div>
             </div>
 

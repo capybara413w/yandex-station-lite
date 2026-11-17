@@ -81,6 +81,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         warn!("Could not optimize 88x2cs Wi-Fi power saving on startup: {}", e);
     }
 
+    // Apply DNS configuration on boot
+    if let Err(e) = crate::services::dns::apply_dns(&initial_config.dns).await {
+        warn!("Could not apply DNS configuration on startup: {}", e);
+    }
+
     // Initial hardware setup: apply default volume step and startup LED glow
     audio.set_volume(initial_config.audio.initial_volume);
     led.set_rgb(0, 150, 255); // Calming cyan startup aura
