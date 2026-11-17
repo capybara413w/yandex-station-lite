@@ -51,6 +51,8 @@ pub struct ChatMessageItem {
     pub color: Option<[u8; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub song: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ha_calls: Option<Vec<crate::services::deepseek::HaCall>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -229,6 +231,7 @@ impl ChatService {
         action: &str,
         color: [u8; 3],
         song: &str,
+        ha_calls: Vec<crate::services::deepseek::HaCall>,
     ) {
         let now = now_secs();
         let mut store = self.store.write().await;
@@ -253,6 +256,7 @@ impl ChatService {
                 action: None,
                 color: None,
                 song: None,
+                ha_calls: None,
             });
 
             // Append Assistant message
@@ -271,6 +275,11 @@ impl ChatService {
                     None
                 } else {
                     Some(song.to_string())
+                },
+                ha_calls: if ha_calls.is_empty() {
+                    None
+                } else {
+                    Some(ha_calls)
                 },
             });
 

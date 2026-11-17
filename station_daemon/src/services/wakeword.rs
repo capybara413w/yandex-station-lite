@@ -90,26 +90,20 @@ pub fn generate_custom_chime_wav() -> Vec<u8> {
 
 /// Plays the custom synthesized assistant chime to ALSA playback device.
 pub fn play_assistant_chime(playback_card: &str) {
-    let wav_path = "/tmp/assistant_chime.wav";
-    if !Path::new(wav_path).exists() {
-        let wav = generate_custom_chime_wav();
-        let _ = std::fs::write(wav_path, wav);
-    }
-
-    // Free any stale playback on hw:0,0
-    let _ = Command::new("killall").args(["-9", "aplay"]).output();
-
-    let aplay_bin = if Path::new("/opt/bin/aplay").exists() {
-        "/opt/bin/aplay"
-    } else if Path::new("/usr/bin/aplay").exists() {
-        "/usr/bin/aplay"
+    let pack = if let Ok(content) = std::fs::read_to_string("/data/config.json") {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+            v.pointer("/soundpack/active_pack")
+                .and_then(|p| p.as_str())
+                .unwrap_or("classic")
+                .to_string()
+        } else {
+            "classic".to_string()
+        }
     } else {
-        "aplay"
+        "classic".to_string()
     };
 
-    let _ = Command::new(aplay_bin)
-        .args(["-D", playback_card, "-q", wav_path])
-        .output();
+    crate::services::soundpack::play_sound(&pack, "activation", playback_card);
 }
 
 pub struct WakeWordService {

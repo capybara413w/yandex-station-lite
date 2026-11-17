@@ -112,12 +112,18 @@ impl LlmClient for OpenRouterLlmClient {
                         "content": item.text
                     }));
                 } else if item.role == "assistant" {
-                    let content = serde_json::json!({
+                    let mut obj = serde_json::json!({
                         "text": item.text,
                         "color": item.color.unwrap_or([0, 200, 255]),
                         "action": item.action.as_deref().unwrap_or("none"),
                         "song": item.song.as_deref().unwrap_or("")
-                    }).to_string();
+                    });
+                    if let Some(calls) = &item.ha_calls {
+                        obj["ha_calls"] = serde_json::to_value(calls).unwrap_or(serde_json::json!([]));
+                    } else {
+                        obj["ha_calls"] = serde_json::json!([]);
+                    }
+                    let content = obj.to_string();
                     messages.push(serde_json::json!({
                         "role": "assistant",
                         "content": content
@@ -275,12 +281,18 @@ impl LlmClient for CloudflareLlmClient {
                         "content": item.text
                     }));
                 } else if item.role == "assistant" {
-                    let content = serde_json::json!({
+                    let mut obj = serde_json::json!({
                         "text": item.text,
                         "color": item.color.unwrap_or([0, 200, 255]),
                         "action": item.action.as_deref().unwrap_or("none"),
                         "song": item.song.as_deref().unwrap_or("")
-                    }).to_string();
+                    });
+                    if let Some(calls) = &item.ha_calls {
+                        obj["ha_calls"] = serde_json::to_value(calls).unwrap_or(serde_json::json!([]));
+                    } else {
+                        obj["ha_calls"] = serde_json::json!([]);
+                    }
+                    let content = obj.to_string();
                     messages.push(serde_json::json!({
                         "role": "assistant",
                         "content": content
@@ -326,15 +338,27 @@ impl LlmClient for CloudflareLlmClient {
                 .await
                 .map_err(|e| format!("Invalid JSON from Cloudflare LLM: {}", e))?;
 
-            let content = if let Some(resp_str) = val.pointer("/result/response").and_then(|v| v.as_str()) {
-                resp_str
-            } else if let Some(resp_str) = val.get("response").and_then(|v| v.as_str()) {
-                resp_str
+            let content_str = if let Some(c) = val.pointer("/result/choices/0/message/content").and_then(|v| v.as_str()) {
+                c.to_string()
+            } else if let Some(c) = val.pointer("/choices/0/message/content").and_then(|v| v.as_str()) {
+                c.to_string()
+            } else if let Some(v) = val.pointer("/result/response") {
+                if let Some(s) = v.as_str() {
+                    s.to_string()
+                } else {
+                    v.to_string()
+                }
+            } else if let Some(v) = val.get("response") {
+                if let Some(s) = v.as_str() {
+                    s.to_string()
+                } else {
+                    v.to_string()
+                }
             } else {
-                "{}"
+                "{}".to_string()
             };
 
-            Ok(parse_clean_json_response(content, prompt))
+            Ok(parse_clean_json_response(&content_str, prompt))
         })
     }
 }
@@ -409,12 +433,18 @@ impl LlmClient for LocalLlmClient {
                         "content": item.text
                     }));
                 } else if item.role == "assistant" {
-                    let content = serde_json::json!({
+                    let mut obj = serde_json::json!({
                         "text": item.text,
                         "color": item.color.unwrap_or([0, 200, 255]),
                         "action": item.action.as_deref().unwrap_or("none"),
                         "song": item.song.as_deref().unwrap_or("")
-                    }).to_string();
+                    });
+                    if let Some(calls) = &item.ha_calls {
+                        obj["ha_calls"] = serde_json::to_value(calls).unwrap_or(serde_json::json!([]));
+                    } else {
+                        obj["ha_calls"] = serde_json::json!([]);
+                    }
+                    let content = obj.to_string();
                     messages.push(serde_json::json!({
                         "role": "assistant",
                         "content": content
@@ -1342,8 +1372,21 @@ pub fn parse_clean_json_response(content: &str, prompt: &str) -> DeepSeekRespons
             } else {
                 [0, 150, 255]
             };
+            let ha_calls = if let Some(arr) = obj.get("ha_calls").and_then(|h| h.as_array()) {
+                arr.iter().filter_map(|item| {
+                    let domain = item.get("domain")?.as_str()?.to_string();
+                    let service = item.get("service")?.as_str()?.to_string();
+                    let service_data = item.get("service_data").cloned().unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+                    Some(crate::services::deepseek::HaCall { domain, service, service_data })
+                }).collect()
+            } else {
+                Vec::new()
+            };
+            let timer_call = obj.get("timer_call").and_then(|t| serde_json::from_value::<crate::services::timer_alarm::TimerCall>(t.clone()).ok());
+            let alarm_call = obj.get("alarm_call").and_then(|a| serde_json::from_value::<crate::services::timer_alarm::AlarmCall>(a.clone()).ok());
+
             if !text.is_empty() {
-                return DeepSeekResponse { text, color, action, song };
+                return DeepSeekResponse { text, color, action, song, ha_calls, timer_call, alarm_call };
             }
         }
     }
@@ -1373,6 +1416,9 @@ pub fn parse_clean_json_response(content: &str, prompt: &str) -> DeepSeekRespons
         color,
         action: "none".to_string(),
         song: String::new(),
+        ha_calls: Vec::new(),
+        timer_call: None,
+        alarm_call: None,
     }
 }
 

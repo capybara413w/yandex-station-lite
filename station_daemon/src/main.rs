@@ -8,8 +8,10 @@ use hardware::{
     AudioHardware, ButtonsListener, LedController, NetworkHardware, StationButtonEvent,
 };
 use services::{
-    play_assistant_chime, ChatService, DeepSeekService, PlayerService, ProxyBridge,
-    SoundCloudService, SttService, TtsService, VisualizerService, WakeWordService, YtMusicService,
+    play_assistant_chime, play_sound, ChatService, DeepSeekService, HomeAssistantService,
+    PlayerService, ProxyBridge, SoundCloudService, StreamingService, SttService,
+    TimerAlarmService, TtsService, VisualizerService, WakeWordService, WeatherService,
+    YtMusicService,
 };
 use std::net::SocketAddr;
 use std::path::Path;
@@ -92,6 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     proxy_bridge.start(8889);
 
     let deepseek = Arc::new(DeepSeekService::new(config.clone(), &initial_config.proxy));
+    let homeassistant = Arc::new(HomeAssistantService::new(config.clone()));
     let soundcloud = Arc::new(SoundCloudService::new(config.clone()));
     let ytmusic = Arc::new(YtMusicService::new(config.clone()));
     let stt = Arc::new(SttService::new(
@@ -114,6 +117,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let chat = Arc::new(ChatService::new(chat_storage_path));
 
+    let weather = Arc::new(WeatherService::new(config.clone()));
+    let alarms_path = if Path::new("/data").exists() {
+        "/data/station_alarms.json"
+    } else {
+        "station_alarms.json"
+    };
+    let timer_alarm = TimerAlarmService::new(alarms_path, Some(tts.clone()), Some(led.clone()));
+
     // 5. Assistant Turn Execution Engine (Triggered by Wake-Word or CenterHold)
     let (assistant_tx, mut assistant_rx) = mpsc::channel::<Option<String>>(16);
 
@@ -135,6 +146,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tts_ref = tts.clone();
     let chat_ref = chat.clone();
     let ww_ref = wakeword.clone();
+    let ha_ref = homeassistant.clone();
+    let weather_ref = weather.clone();
+    let timer_alarm_ref = timer_alarm.clone();
 
     tokio::spawn(async move {
         while let Some(initial_prompt) = assistant_rx.recv().await {
@@ -143,6 +157,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 led_ref.clone(),
                 stt_ref.clone(),
                 ds_ref.clone(),
+                ha_ref.clone(),
+                weather_ref.clone(),
+                timer_alarm_ref.clone(),
                 player_ref.clone(),
                 sc_ref.clone(),
                 yt_ref.clone(),
@@ -162,8 +179,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let led_clone = led.clone();
     let player_clone = player.clone();
     let tts_clone = tts.clone();
+    let timer_alarm_clone = timer_alarm.clone();
     let assistant_tx_clone = assistant_tx.clone();
     let alsa_card_str = initial_config.audio.alsa_card.clone();
+    let config_btn = config.clone();
 
     tokio::spawn(async move {
         while let Some(event) = btn_rx.recv().await {
@@ -177,6 +196,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match event {
                 // Volume Up (+)
                 StationButtonEvent::VolumeUp => {
+                    if timer_alarm_clone.is_ringing() {
+                        timer_alarm_clone.stop_ringing();
+                        led_clone.blink(0, 255, 100, 100);
+                        continue;
+                    }
                     let (new_vol, changed) = audio_clone.adjust_volume(1);
                     if changed {
                         info!("Hardware Event: VolumeUp -> step {}/10", new_vol);
@@ -188,6 +212,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 // Volume Down (-)
                 StationButtonEvent::VolumeDown => {
+                    if timer_alarm_clone.is_ringing() {
+                        timer_alarm_clone.stop_ringing();
+                        led_clone.blink(0, 255, 100, 100);
+                        continue;
+                    }
                     let (new_vol, changed) = audio_clone.adjust_volume(-1);
                     if changed {
                         info!("Hardware Event: VolumeDown -> step {}/10", new_vol);
@@ -200,6 +229,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Center Touch Sensor: Short Tap (< 0.7 sec)
                 StationButtonEvent::CenterTap => {
                     info!("Hardware Event: CenterTap (Play/Pause Toggle / Interrupt Speech)");
+                    // If timer/alarm is ringing -> stop ringing immediately!
+                    if timer_alarm_clone.is_ringing() {
+                        info!("CenterTap stopped ringing timer/alarm");
+                        timer_alarm_clone.stop_ringing();
+                        led_clone.blink(0, 255, 100, 100);
+                        continue;
+                    }
                     // If native TTS is actively speaking -> interrupt speech immediately
                     if tts_clone.is_speaking() {
                         tts_clone.stop(&led_clone);
@@ -215,8 +251,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     player_clone.pause(&led_clone).await;
                     // 2. Illuminate Alice Purple
                     led_clone.set_rgb(180, 0, 255);
-                    // 3. Play electronic assistant chime
-                    play_assistant_chime(&alsa_card_str);
+                    // 3. Play soundpack assistant chime
+                    let active_pack = config_btn.read().await.soundpack.active_pack.clone();
+                    play_sound(&active_pack, "activation", &alsa_card_str);
                     // 4. Trigger assistant turn with VAD
                     let _ = assistant_tx_clone.send(None).await;
                 }
@@ -224,7 +261,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // 7. Launch Axum HTTP Server & Web Control Panel
+    // 7. Initialize Streaming Receivers (AirPlay, Spotify Connect, Snapcast)
+    let streaming = Arc::new(StreamingService::new(config.clone()));
+    streaming.sync_services().await;
+
+    // 8. Launch Axum HTTP Server & Web Control Panel
     let app_state = web::AppState {
         config: config.clone(),
         audio: audio.clone(),
@@ -242,6 +283,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         start_time: std::time::Instant::now(),
         chat: chat.clone(),
         wakeword: wakeword.clone(),
+        homeassistant: homeassistant.clone(),
+        weather: weather.clone(),
+        timer_alarm: timer_alarm.clone(),
+        streaming: streaming.clone(),
     };
 
     let router = web::create_router(app_state);
@@ -318,6 +363,9 @@ async fn execute_assistant_turn(
     led_ref: Arc<LedController>,
     stt_ref: Arc<SttService>,
     ds_ref: Arc<DeepSeekService>,
+    ha_ref: Arc<HomeAssistantService>,
+    weather_ref: Arc<WeatherService>,
+    timer_alarm_ref: Arc<TimerAlarmService>,
     player_ref: Arc<PlayerService>,
     sc_ref: Arc<SoundCloudService>,
     yt_ref: Arc<YtMusicService>,
@@ -365,19 +413,65 @@ async fn execute_assistant_turn(
     // Multi-turn session & 1-hour rule context
     let (session_id, history, _) = chat_ref.prepare_session_for_prompt(None).await;
 
-    // Send query to DeepSeek/LLM with history
-    match ds_ref.query_with_history(&recognized_text, &history).await {
+    // 1. Fetch live Contexts: Home Assistant, Weather, Timers & Alarms (ALL queries go strictly through LLM)
+    let mut context_parts = Vec::new();
+    let ha_context = ha_ref.get_entities_summary().await;
+    if !ha_context.is_empty() {
+        context_parts.push(ha_context);
+    }
+    let weather_context = weather_ref.get_summary().await;
+    if !weather_context.is_empty() {
+        context_parts.push(weather_context);
+    }
+    let timer_context = timer_alarm_ref.get_summary().await;
+    if !timer_context.is_empty() {
+        context_parts.push(timer_context);
+    }
+    let effective_context = context_parts.join("\n\n");
+
+    // 2. Send query to LLM with history and live combined context
+    match ds_ref.query_with_context(&recognized_text, &history, &effective_context).await {
         Ok(resp) => {
-            info!("DeepSeek reply: '{}' (action: {})", resp.text, resp.action);
+            info!("LLM reply: '{}' (action: {}, ha_calls: {})", resp.text, resp.action, resp.ha_calls.len());
+
+            // Execute any Home Assistant API calls returned strictly by LLM
+            for ha_call in &resp.ha_calls {
+                info!("LLM calling Home Assistant: {}/{} data={:?}", ha_call.domain, ha_call.service, ha_call.service_data);
+                if let Err(e) = ha_ref.call_service(&ha_call.domain, &ha_call.service, ha_call.service_data.clone()).await {
+                    error!("Failed to execute HA call {}/{}: {}", ha_call.domain, ha_call.service, e);
+                }
+            }
+
+            // Execute Timer calls returned strictly by LLM
+            if let Some(t_call) = &resp.timer_call {
+                timer_alarm_ref.process_timer_call(t_call).await;
+            }
+
+            // Execute Alarm calls returned strictly by LLM
+            if let Some(a_call) = &resp.alarm_call {
+                timer_alarm_ref.process_alarm_call(a_call).await;
+            }
+
+            // Stop alarm/timer chime if requested or if ringing
+            if resp.action == "stop" || timer_alarm_ref.is_ringing() {
+                timer_alarm_ref.stop_ringing();
+            }
+
+            let turn_action = if !resp.ha_calls.is_empty() {
+                format!("ha_calls:{}", resp.ha_calls.len())
+            } else {
+                resp.action.clone()
+            };
 
             chat_ref
                 .record_turn(
                     &session_id,
                     &recognized_text,
                     &resp.text,
-                    &resp.action,
+                    &turn_action,
                     resp.color,
                     &resp.song,
+                    resp.ha_calls.clone(),
                 )
                 .await;
 
@@ -418,6 +512,7 @@ async fn execute_assistant_turn(
                     "error",
                     color,
                     "",
+                    Vec::new(),
                 )
                 .await;
             led_ref.blink(color[0], color[1], color[2], 200);

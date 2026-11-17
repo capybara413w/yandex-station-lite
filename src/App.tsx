@@ -89,6 +89,12 @@ interface Config {
   stt_extra_payload?: any;
   socks5_enabled?: boolean;
   socks5_url?: string;
+  homeassistant?: {
+    enabled?: boolean;
+    url?: string;
+    token?: string;
+    conversation_api?: boolean;
+  };
 }
 
 interface PlayerStatus {
@@ -129,6 +135,44 @@ interface TelemetryData {
   soc_model: string;
 }
 
+interface WeatherReport {
+  city: string;
+  temperature: number;
+  apparent_temperature: number;
+  humidity: number;
+  wind_speed: number;
+  weather_code: number;
+  condition: string;
+  is_day: boolean;
+  temp_max: number;
+  temp_min: number;
+  daily: Array<{
+    date: string;
+    temp_max: number;
+    temp_min: number;
+    condition: string;
+    weather_code: number;
+  }>;
+  updated_at: number;
+}
+
+interface TimerItem {
+  id: string;
+  duration_secs: number;
+  ends_at: number;
+  remaining_secs: number;
+  label: string;
+  is_ringing: boolean;
+}
+
+interface AlarmItem {
+  id: string;
+  time: string;
+  label: string;
+  enabled: boolean;
+  repeat: string;
+}
+
 const DEFAULT_ASSISTANT_PROMPT = `Ты — умный голосовой ассистент смарт-колонки с поддержкой управления музыкой и светодиодной подсветкой.
 Твои ответы сразу отправляются в голосовой синтезатор (TTS) и воспроизводятся динамиком.
 
@@ -155,13 +199,15 @@ const TAB_WATERMARKS: Record<string, string> = {
   home: '/assets/boykisser/boykisser_3.png',
   music: '/assets/boykisser/boykisser_4.png',
   assistant: '/assets/boykisser/boykisser_5.png',
+  clock: '/assets/boykisser/boykisser_2.png',
+  hass: '/assets/boykisser/boykisser_4.png',
   led: '/assets/boykisser/boykisser_2.png',
   terminal: '/assets/boykisser/boykisser_1.png',
   settings: '/assets/boykisser/boykisser_3.png',
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'home' | 'music' | 'assistant' | 'led' | 'terminal' | 'settings' | 'guide'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'music' | 'assistant' | 'clock' | 'hass' | 'led' | 'terminal' | 'settings' | 'guide'>('home');
   const [isBoykisserModalOpen, setIsBoykisserModalOpen] = useState(false);
 
   const [config, setConfig] = useState<Config>({});
@@ -174,6 +220,19 @@ export default function App() {
     duration_secs: 0,
   });
   const [dialogueLogs, setDialogueLogs] = useState<DialogueLog[]>([]);
+
+  // Weather, Timers & Alarms state
+  const [weather, setWeather] = useState<WeatherReport | null>(null);
+  const [weatherCityInput, setWeatherCityInput] = useState('Москва');
+  const [isWeatherLoading, setIsWeatherLoading] = useState(false);
+  const [timers, setTimers] = useState<TimerItem[]>([]);
+  const [alarms, setAlarms] = useState<AlarmItem[]>([]);
+  const [isAlarmRinging, setIsAlarmRinging] = useState(false);
+  const [newTimerMins, setNewTimerMins] = useState(5);
+  const [newTimerLabel, setNewTimerLabel] = useState('');
+  const [newAlarmTime, setNewAlarmTime] = useState('07:30');
+  const [newAlarmLabel, setNewAlarmLabel] = useState('Будильник');
+  const [newAlarmRepeat, setNewAlarmRepeat] = useState('daily');
 
   // Telemetry state
   const [telemetry, setTelemetry] = useState<TelemetryData>({
@@ -297,6 +356,46 @@ export default function App() {
   const [ledColor, setLedColor] = useState<number[]>([255, 180, 194]);
   const [ledBrightness, setLedBrightness] = useState(85);
 
+  // Streaming Sinks (AirPlay 2, Spotify Connect, Snapcast Multiroom, BT Sink)
+  const [streamingStatus, setStreamingStatus] = useState<{
+    airplay_enabled: boolean;
+    airplay_running: boolean;
+    airplay_name: string;
+    spotify_enabled: boolean;
+    spotify_running: boolean;
+    spotify_name: string;
+    snapcast_enabled: boolean;
+    snapcast_running: boolean;
+    snapcast_server: string;
+    snapcast_port: number;
+    bluetooth_sink_enabled: boolean;
+    bluetooth_sink_running: boolean;
+  }>({
+    airplay_enabled: false,
+    airplay_running: false,
+    airplay_name: 'Яндекс Станция Лайт (AirPlay)',
+    spotify_enabled: false,
+    spotify_running: false,
+    spotify_name: 'Yandex Station Lite (Spotify)',
+    snapcast_enabled: false,
+    snapcast_running: false,
+    snapcast_server: '192.168.0.106',
+    snapcast_port: 1704,
+    bluetooth_sink_enabled: false,
+    bluetooth_sink_running: false,
+  });
+  const [isStreamingSaving, setIsStreamingSaving] = useState(false);
+  const [btSinkDiscoverableMsg, setBtSinkDiscoverableMsg] = useState('');
+
+  // Sound Packs state
+  const [soundPacks, setSoundPacks] = useState<{ id: string; name: string; description: string; active: boolean }[]>([]);
+  const [activeSoundPack, setActiveSoundPack] = useState('classic');
+  const [isPlayingSoundPreview, setIsPlayingSoundPreview] = useState<string | null>(null);
+
+  // Home Assistant Media Player Sync state
+  const [isHaSyncing, setIsHaSyncing] = useState(false);
+  const [haSyncMessage, setHaSyncMessage] = useState('');
+
   // Wi-Fi state
   const [wifiStatus, setWifiStatus] = useState<any>({
     connected: false,
@@ -334,6 +433,20 @@ export default function App() {
   });
   const [btDiscovered, setBtDiscovered] = useState<any[]>([]);
   const [isBtScanning, setIsBtScanning] = useState(false);
+
+  // Home Assistant state
+  const [hassEnabledInput, setHassEnabledInput] = useState(true);
+  const [hassUrlInput, setHassUrlInput] = useState('http://192.168.0.106:8123');
+  const [hassTokenInput, setHassTokenInput] = useState('');
+  const [hassConversationApiInput, setHassConversationApiInput] = useState(true);
+  const [hassStatus, setHassStatus] = useState<{ connected: boolean; message: string }>({ connected: false, message: 'Проверка...' });
+  const [hassEntities, setHassEntities] = useState<any[]>([]);
+  const [hassLoading, setHassLoading] = useState(false);
+  const [hassFilterDomain, setHassFilterDomain] = useState<string>('all');
+  const [hassVoiceCommandInput, setHassVoiceCommandInput] = useState('');
+  const [hassVoiceResult, setHassVoiceResult] = useState<string | null>(null);
+  const [hassVoiceTesting, setHassVoiceTesting] = useState(false);
+  const [hassShowToken, setHassShowToken] = useState(false);
 
   const fetchWifiStatus = async () => {
     try {
@@ -496,6 +609,107 @@ export default function App() {
     }
   };
 
+  const fetchHassStatus = async () => {
+    try {
+      const res = await fetch('/api/hass/status');
+      if (res.ok) {
+        const d = await res.json();
+        if (d.status === 'ok') {
+          setHassStatus({ connected: true, message: 'Подключено к Home Assistant API' });
+        } else {
+          setHassStatus({ connected: false, message: d.message || 'Ошибка подключения' });
+        }
+      } else {
+        setHassStatus({ connected: false, message: 'Сервер недоступен' });
+      }
+    } catch {
+      setHassStatus({ connected: false, message: 'Не удалось связаться со Станцией' });
+    }
+  };
+
+  const fetchHassEntities = async () => {
+    setHassLoading(true);
+    try {
+      const res = await fetch('/api/hass/entities');
+      if (res.ok) {
+        const d = await res.json();
+        if (d.entities) {
+          setHassEntities(d.entities);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setHassLoading(false);
+    }
+  };
+
+  const handleCallHassService = async (domain: string, service: string, entity_id?: string) => {
+    try {
+      const payload: any = { domain, service, service_data: {} };
+      if (entity_id) {
+        payload.service_data.entity_id = entity_id;
+      }
+      await fetch('/api/hass/call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      setTimeout(fetchHassEntities, 600);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleTestHassVoice = async () => {
+    if (!hassVoiceCommandInput.trim()) return;
+    setHassVoiceTesting(true);
+    setHassVoiceResult(null);
+    try {
+      const res = await fetch('/api/hass/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: hassVoiceCommandInput.trim() }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setHassVoiceResult(d.speech || 'Команда выполнена успешно');
+      } else {
+        setHassVoiceResult('Ошибка выполнения команды');
+      }
+    } catch (e: any) {
+      setHassVoiceResult(`Сбой связи: ${e.message}`);
+    } finally {
+      setHassVoiceTesting(false);
+    }
+  };
+
+  const handleSaveHassConfig = async () => {
+    try {
+      const updatedConfig = {
+        ...config,
+        homeassistant: {
+          enabled: hassEnabledInput,
+          url: hassUrlInput.trim(),
+          token: hassTokenInput.trim(),
+          conversation_api: hassConversationApiInput,
+        },
+      };
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedConfig),
+      });
+      setConfig(updatedConfig);
+      await fetchHassStatus();
+      await fetchHassEntities();
+      alert('Настройки Home Assistant успешно сохранены в /data/config.json!');
+    } catch (e) {
+      console.error(e);
+      alert('Ошибка при сохранении настроек Home Assistant');
+    }
+  };
+
   const fetchConfig = async () => {
     try {
       const res = await fetch('/api/config');
@@ -562,6 +776,12 @@ export default function App() {
         if (data.custom_tts_url) setCustomTtsUrlInput(data.custom_tts_url);
         if (data.station_ip) setStationIpInput(data.station_ip);
         if (data.socks5_enabled !== undefined) setSocks5EnabledInput(!!data.socks5_enabled);
+        if (data.homeassistant) {
+          if (data.homeassistant.enabled !== undefined) setHassEnabledInput(data.homeassistant.enabled);
+          if (data.homeassistant.url) setHassUrlInput(data.homeassistant.url);
+          if (data.homeassistant.token) setHassTokenInput(data.homeassistant.token);
+          if (data.homeassistant.conversation_api !== undefined) setHassConversationApiInput(data.homeassistant.conversation_api);
+        }
       }
     } catch (e) {
       console.error(e);
@@ -628,6 +848,153 @@ export default function App() {
     }
   };
 
+  const fetchWeather = async () => {
+    try {
+      setIsWeatherLoading(true);
+      const res = await fetch('/api/weather');
+      if (res.ok) {
+        const data = await res.json();
+        if (!data.error) {
+          setWeather(data);
+          if (data.city) setWeatherCityInput(data.city);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsWeatherLoading(false);
+    }
+  };
+
+  const handleUpdateWeatherCity = async (cityToSet?: string) => {
+    const target = (cityToSet || weatherCityInput).trim();
+    if (!target) return;
+    try {
+      setIsWeatherLoading(true);
+      const res = await fetch('/api/weather/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ city: target }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (!data.error) setWeather(data);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsWeatherLoading(false);
+    }
+  };
+
+  const fetchTimers = async () => {
+    try {
+      const res = await fetch('/api/timers');
+      if (res.ok) {
+        const data = await res.json();
+        setTimers(data.timers || []);
+        const ringing = (data.timers || []).some((t: TimerItem) => t.is_ringing);
+        setIsAlarmRinging(ringing);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchAlarms = async () => {
+    try {
+      const res = await fetch('/api/alarms');
+      if (res.ok) {
+        const data = await res.json();
+        setAlarms(data.alarms || []);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleCreateTimer = async (mins: number, label?: string) => {
+    try {
+      const duration = Math.max(1, Math.round(mins * 60));
+      await fetch('/api/timers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration, label: label || 'Таймер' }),
+      });
+      fetchTimers();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleCancelTimer = async (id: string) => {
+    try {
+      await fetch(`/api/timers/${id}`, { method: 'DELETE' });
+      fetchTimers();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleCancelAllTimers = async () => {
+    try {
+      await fetch('/api/timers/cancel_all', { method: 'POST' });
+      fetchTimers();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleCreateAlarm = async () => {
+    try {
+      await fetch('/api/alarms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          time: newAlarmTime,
+          label: newAlarmLabel || 'Будильник',
+          repeat: newAlarmRepeat,
+          enabled: true,
+        }),
+      });
+      fetchAlarms();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleToggleAlarm = async (id: string, current: boolean) => {
+    try {
+      await fetch(`/api/alarms/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !current }),
+      });
+      fetchAlarms();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDeleteAlarm = async (id: string) => {
+    try {
+      await fetch(`/api/alarms/${id}`, { method: 'DELETE' });
+      fetchAlarms();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleStopRinging = async () => {
+    try {
+      await fetch('/api/alarm/stop', { method: 'POST' });
+      setIsAlarmRinging(false);
+      fetchTimers();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
     fetchConfig();
     fetchPlayerStatus();
@@ -638,18 +1005,38 @@ export default function App() {
     fetchBtStatus();
     fetchYtStatus();
     fetchYtHome();
+    fetchHassStatus();
+    fetchHassEntities();
+    fetchWeather();
+    fetchTimers();
+    fetchAlarms();
+    fetchStreamingStatus();
+    fetchSoundPacks();
 
     const timer = setInterval(() => {
       fetchPlayerStatus();
       fetchDialogueLogs();
       fetchWifiStatus();
-    }, 4000);
+      fetchTimers();
+    }, 3000);
     const telTimer = setInterval(fetchTelemetry, 5000);
+    const weatherTimer = setInterval(fetchWeather, 60000);
     return () => {
       clearInterval(timer);
       clearInterval(telTimer);
+      clearInterval(weatherTimer);
     };
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'hass') {
+      fetchHassStatus();
+      fetchHassEntities();
+    } else if (activeTab === 'music' || activeTab === 'settings') {
+      fetchStreamingStatus();
+      fetchSoundPacks();
+    }
+  }, [activeTab]);
 
   const handlePlayerAction = async (action: 'play' | 'pause' | 'resume' | 'stop') => {
     try {
@@ -904,6 +1291,92 @@ export default function App() {
     }
   };
 
+  const fetchStreamingStatus = async () => {
+    try {
+      const res = await fetch('/api/streaming/status');
+      if (res.ok) {
+        const data = await res.json();
+        setStreamingStatus(data);
+      }
+    } catch (e) {}
+  };
+
+  const updateStreamingConfig = async (patch: any) => {
+    setIsStreamingSaving(true);
+    try {
+      const res = await fetch('/api/streaming/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status) setStreamingStatus(data.status);
+      }
+    } catch (e) {
+    } finally {
+      setIsStreamingSaving(false);
+    }
+  };
+
+  const toggleBtSink = async (enable: boolean) => {
+    try {
+      const endpoint = enable ? '/api/bluetooth/sink/enable' : '/api/bluetooth/sink/disable';
+      const res = await fetch(endpoint, { method: 'POST' });
+      const data = await res.json();
+      if (data.message) setBtSinkDiscoverableMsg(data.message);
+      await fetchStreamingStatus();
+    } catch (e) {}
+  };
+
+  const fetchSoundPacks = async () => {
+    try {
+      const res = await fetch('/api/sounds/packs');
+      if (res.ok) {
+        const data = await res.json();
+        setSoundPacks(data.packs || []);
+        if (data.active_pack) setActiveSoundPack(data.active_pack);
+      }
+    } catch (e) {}
+  };
+
+  const selectSoundPack = async (packId: string) => {
+    try {
+      setActiveSoundPack(packId);
+      await fetch('/api/sounds/pack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pack: packId }),
+      });
+      await fetchSoundPacks();
+    } catch (e) {}
+  };
+
+  const previewSound = (packId: string, soundType: string = 'activation') => {
+    setIsPlayingSoundPreview(packId);
+    const audio = new Audio(`/api/sounds/preview?pack=${packId}&sound=${soundType}`);
+    audio.play().catch(() => {});
+    audio.onended = () => setIsPlayingSoundPreview(null);
+  };
+
+  const syncHaMediaPlayer = async () => {
+    setIsHaSyncing(true);
+    setHaSyncMessage('');
+    try {
+      const res = await fetch('/api/media_player/sync', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setHaSyncMessage('Успешно синхронизировано с Home Assistant!');
+      } else {
+        setHaSyncMessage(`Ошибка: ${data.error || 'не удалось связаться с HA'}`);
+      }
+    } catch (e: any) {
+      setHaSyncMessage(`Ошибка сети: ${e?.message || e}`);
+    } finally {
+      setIsHaSyncing(false);
+    }
+  };
+
   const handleToggleVisualizer = async () => {
     const next = !visualizerEnabledInput;
     setVisualizerEnabledInput(next);
@@ -957,6 +1430,12 @@ export default function App() {
       cartesia_tts_voice_id: cartesiaTtsVoiceIdInput.trim(),
       custom_tts_url: customTtsUrlInput.trim(),
       socks5_enabled: socks5EnabledInput,
+      homeassistant: config.homeassistant || {
+        enabled: hassEnabledInput,
+        url: hassUrlInput.trim(),
+        token: hassTokenInput.trim(),
+        conversation_api: hassConversationApiInput,
+      },
     };
 
     if (openrouterKeyInput.trim()) payload.openrouter_api_key = openrouterKeyInput.trim();
@@ -1190,6 +1669,30 @@ export default function App() {
 
           <button 
             type="button" 
+            className={`m3-nav-rail-item ${activeTab === 'hass' ? 'active' : ''}`}
+            onClick={() => setActiveTab('hass')}
+            title="Умный дом (Home Assistant)"
+          >
+            <div className="m3-nav-rail-pill">
+              <span className="material-symbols-rounded">home_iot_device</span>
+            </div>
+            <span className="m3-nav-rail-label">умный дом</span>
+          </button>
+
+          <button 
+            type="button" 
+            className={`m3-nav-rail-item ${activeTab === 'clock' ? 'active' : ''}`}
+            onClick={() => setActiveTab('clock')}
+            title="Будильники и таймеры"
+          >
+            <div className="m3-nav-rail-pill">
+              <span className="material-symbols-rounded">alarm</span>
+            </div>
+            <span className="m3-nav-rail-label">таймеры</span>
+          </button>
+
+          <button 
+            type="button" 
             className={`m3-nav-rail-item ${activeTab === 'led' ? 'active' : ''}`}
             onClick={() => setActiveTab('led')}
             title="Подсветка LED"
@@ -1261,9 +1764,59 @@ export default function App() {
           </button>
         </header>
 
+        {/* Ringing Alert Banner if any timer or alarm is ringing */}
+        {isAlarmRinging && (
+          <div style={{
+            background: 'linear-gradient(135deg, #b00020, #e91e63)',
+            color: '#fff',
+            padding: '16px 24px',
+            borderRadius: '20px',
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            boxShadow: '0 6px 24px rgba(233, 30, 99, 0.4)',
+            gap: '16px',
+            flexWrap: 'wrap'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+              <span className="material-symbols-rounded" style={{ fontSize: '36px', color: '#fff' }}>notifications_active</span>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '1.15rem', letterSpacing: '0.5px' }}>
+                  ЗВУЧИТ СИГНАЛ (ТАЙМЕР / БУДИЛЬНИК)!
+                </div>
+                <div style={{ fontSize: '0.85rem', opacity: 0.92, marginTop: '2px' }}>
+                  Нажмите кнопку справа или коснитесь верхней панели колонки для выключения звука.
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleStopRinging}
+              style={{
+                background: '#fff',
+                color: '#b00020',
+                border: 'none',
+                borderRadius: '14px',
+                padding: '10px 24px',
+                fontWeight: 800,
+                fontSize: '0.95rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 2px 10px rgba(0,0,0,0.2)'
+              }}
+            >
+              <span className="material-symbols-rounded" style={{ fontSize: '20px' }}>stop_circle</span>
+              <span>ОСТАНОВИТЬ СИГНАЛ</span>
+            </button>
+          </div>
+        )}
+
         {/* ----------------- TAB: HOME (Left: Quick Settings, Right: Telemetry & Assistant) ----------------- */}
         {activeTab === 'home' && (
-          <div>
+          <div className="m3-tab-view">
             <div className="m3-home-grid">
               {/* Left Large Flat Pink Card (Быстрые настройки) */}
               <div className="m3-hero-pink-card">
@@ -1543,6 +2096,105 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* 1.5 Weather Widget Card */}
+                <div className="m3-surface-card" style={{ background: '#1d1b22' }}>
+                  <div className="m3-card-header">
+                    <div className="m3-card-title">
+                      <span className="material-symbols-rounded" style={{ color: '#f8c057' }}>wb_sunny</span>
+                      <span>Погода • {weather?.city || 'Москва'}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '0.74rem', color: '#ffb4c2', fontWeight: 600 }}>
+                        {isWeatherLoading ? 'Загрузка...' : 'ОНЛАЙН'}
+                      </span>
+                      <button
+                        type="button"
+                        style={{ background: 'transparent', border: 'none', color: '#c7c2c9', cursor: 'pointer', display: 'flex', padding: '2px' }}
+                        onClick={fetchWeather}
+                        title="Обновить погоду"
+                      >
+                        <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>refresh</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {weather ? (
+                    <div>
+                      {/* Current Weather Big Display */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                          <span style={{ fontSize: '42px', lineHeight: 1 }}>
+                            {weather.condition.includes('☀️') ? '☀️' : weather.condition.includes('⛅') ? '⛅' : weather.condition.includes('🌧️') ? '🌧️' : weather.condition.includes('🌨️') ? '🌨️' : weather.condition.includes('❄️') ? '❄️' : '☁️'}
+                          </span>
+                          <div>
+                            <div style={{ fontSize: '2rem', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>
+                              {weather.temperature > 0 ? `+${weather.temperature}` : weather.temperature}°C
+                            </div>
+                            <div style={{ fontSize: '0.85rem', color: '#ffb4c2', fontWeight: 600 }}>
+                              {weather.condition}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ textAlign: 'right', fontSize: '0.78rem', color: '#c7c2c9' }}>
+                          <div>Ощущается: <span style={{ color: '#fff', fontWeight: 700 }}>{weather.apparent_temperature > 0 ? `+${weather.apparent_temperature}` : weather.apparent_temperature}°C</span></div>
+                          <div style={{ marginTop: '3px' }}>Ветер: <span style={{ color: '#78dc96', fontWeight: 700 }}>{weather.wind_speed} км/ч</span></div>
+                          <div style={{ marginTop: '3px' }}>Влажность: <span style={{ color: '#00e5ff', fontWeight: 700 }}>{weather.humidity}%</span></div>
+                        </div>
+                      </div>
+
+                      {/* 3-day forecast mini-tiles */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '12px' }}>
+                        {weather.daily && weather.daily.slice(0, 3).map((day, idx) => (
+                          <div
+                            key={idx}
+                            style={{
+                              background: '#161419',
+                              borderRadius: '12px',
+                              padding: '8px 10px',
+                              textAlign: 'center',
+                              fontSize: '0.75rem',
+                            }}
+                          >
+                            <div style={{ color: '#8e8893', fontWeight: 700, marginBottom: '2px' }}>{day.date}</div>
+                            <div style={{ fontSize: '1.1rem', margin: '2px 0' }}>
+                              {day.condition.includes('☀️') ? '☀️' : day.condition.includes('🌧️') ? '🌧️' : day.condition.includes('🌨️') ? '🌨️' : '⛅'}
+                            </div>
+                            <div style={{ fontWeight: 800, color: '#fff' }}>
+                              {day.temp_max > 0 ? `+${day.temp_max}` : day.temp_max}° / {day.temp_min > 0 ? `+${day.temp_min}` : day.temp_min}°
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* City Switcher Input */}
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <input
+                          type="text"
+                          className="m3-input"
+                          placeholder="Сменить город (Москва, Санкт-Петербург, Сочи)..."
+                          value={weatherCityInput}
+                          onChange={(e) => setWeatherCityInput(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleUpdateWeatherCity()}
+                          style={{ fontSize: '0.82rem', padding: '8px 12px' }}
+                        />
+                        <button
+                          type="button"
+                          className="m3-btn m3-btn-primary"
+                          onClick={() => handleUpdateWeatherCity()}
+                          style={{ padding: '0 14px', fontSize: '0.78rem' }}
+                        >
+                          Обновить
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ padding: '16px', textAlign: 'center', color: '#8e8893', fontSize: '0.85rem' }}>
+                      {isWeatherLoading ? 'Загрузка погоды...' : 'Нажмите обновить для получения сводки погоды'}
+                    </div>
+                  )}
+                </div>
+
                 {/* 2. Bottom Right Card: Quick Voice Assistant */}
                 <div className="m3-surface-card">
                   <div className="m3-card-header">
@@ -1594,7 +2246,7 @@ export default function App() {
 
         {/* ----------------- TAB: MUSIC (Full Featured Awesome Player) ----------------- */}
         {activeTab === 'music' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+          <div className="m3-tab-view" style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
             {/* 1. Main Full Hero Player */}
             <div className="m3-surface-card" style={{ background: '#1d1b22', border: 'none' }}>
               <div style={{ display: 'flex', gap: '28px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -2339,12 +2991,212 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* 4. Wireless Streaming Sinks (AirPlay 2, Spotify Connect, Snapcast Multiroom, BT Sink) */}
+            <div className="m3-surface-card">
+              <div className="m3-card-header" style={{ flexWrap: 'wrap', gap: '12px' }}>
+                <div className="m3-card-title">
+                  <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>cast</span>
+                  <span>Беспроводной стриминг (AirPlay 2, Spotify Connect, Snapcast, Bluetooth)</span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="m3-btn m3-btn-tonal"
+                    onClick={fetchStreamingStatus}
+                    disabled={isStreamingSaving}
+                    style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                  >
+                    <span className="material-symbols-rounded">refresh</span>
+                    <span>Обновить</span>
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ fontSize: '0.82rem', color: '#9d96a2', lineHeight: 1.4, marginBottom: '16px' }}>
+                Транслируйте музыку прямо со своих устройств на Яндекс Станцию без сторонних облаков. Звук воспроизводится напрямую через ЦАП TAS5805M.
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+                {/* AirPlay 2 Receiver */}
+                <div style={{ background: '#17151b', borderRadius: '16px', padding: '16px', border: '1px solid #28242f' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, color: '#fff' }}>
+                      <span className="material-symbols-rounded" style={{ color: '#90caf9' }}>airplay</span>
+                      <span>Apple AirPlay 2</span>
+                    </div>
+                    <span className={`m3-badge ${streamingStatus.airplay_running ? 'online' : ''}`} style={{
+                      background: streamingStatus.airplay_running ? 'rgba(76, 175, 80, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                      color: streamingStatus.airplay_running ? '#81c784' : '#888',
+                      fontSize: '0.74rem'
+                    }}>
+                      {streamingStatus.airplay_running ? 'АКТИВЕН' : 'ОТКЛЮЧЕН'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#9d96a2', marginBottom: '12px' }}>
+                    Стриминг с iPhone, iPad и Mac через стандартное системное меню «AirPlay».
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      style={{ fontSize: '0.8rem', padding: '6px 10px' }}
+                      value={streamingStatus.airplay_name}
+                      onChange={(e) => setStreamingStatus({ ...streamingStatus, airplay_name: e.target.value })}
+                      placeholder="Имя в списке AirPlay"
+                    />
+                    <button
+                      type="button"
+                      className={`m3-btn ${streamingStatus.airplay_enabled ? 'm3-btn-tonal' : 'm3-btn-primary'}`}
+                      style={{ fontSize: '0.78rem', padding: '6px 14px', whiteSpace: 'nowrap' }}
+                      onClick={() => updateStreamingConfig({
+                        airplay_enabled: !streamingStatus.airplay_enabled,
+                        airplay_name: streamingStatus.airplay_name,
+                      })}
+                      disabled={isStreamingSaving}
+                    >
+                      <span>{streamingStatus.airplay_enabled ? 'Выключить' : 'Включить'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Spotify Connect */}
+                <div style={{ background: '#17151b', borderRadius: '16px', padding: '16px', border: '1px solid #28242f' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, color: '#fff' }}>
+                      <span className="material-symbols-rounded" style={{ color: '#1db954' }}>album</span>
+                      <span>Spotify Connect</span>
+                    </div>
+                    <span className={`m3-badge ${streamingStatus.spotify_running ? 'online' : ''}`} style={{
+                      background: streamingStatus.spotify_running ? 'rgba(29, 185, 84, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                      color: streamingStatus.spotify_running ? '#1db954' : '#888',
+                      fontSize: '0.74rem'
+                    }}>
+                      {streamingStatus.spotify_running ? 'АКТИВЕН' : 'ОТКЛЮЧЕН'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#9d96a2', marginBottom: '12px' }}>
+                    Колонка отображается в приложении Spotify на смартфонах и ПК (librespot).
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      style={{ fontSize: '0.8rem', padding: '6px 10px' }}
+                      value={streamingStatus.spotify_name}
+                      onChange={(e) => setStreamingStatus({ ...streamingStatus, spotify_name: e.target.value })}
+                      placeholder="Имя в Spotify"
+                    />
+                    <button
+                      type="button"
+                      className={`m3-btn ${streamingStatus.spotify_enabled ? 'm3-btn-tonal' : 'm3-btn-primary'}`}
+                      style={{ fontSize: '0.78rem', padding: '6px 14px', whiteSpace: 'nowrap' }}
+                      onClick={() => updateStreamingConfig({
+                        spotify_enabled: !streamingStatus.spotify_enabled,
+                        spotify_name: streamingStatus.spotify_name,
+                      })}
+                      disabled={isStreamingSaving}
+                    >
+                      <span>{streamingStatus.spotify_enabled ? 'Выключить' : 'Включить'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Snapcast Multi-room */}
+                <div style={{ background: '#17151b', borderRadius: '16px', padding: '16px', border: '1px solid #28242f' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, color: '#fff' }}>
+                      <span className="material-symbols-rounded" style={{ color: '#ce93d8' }}>speaker_group</span>
+                      <span>Snapcast Multiroom</span>
+                    </div>
+                    <span className={`m3-badge ${streamingStatus.snapcast_running ? 'online' : ''}`} style={{
+                      background: streamingStatus.snapcast_running ? 'rgba(206, 147, 216, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                      color: streamingStatus.snapcast_running ? '#ce93d8' : '#888',
+                      fontSize: '0.74rem'
+                    }}>
+                      {streamingStatus.snapcast_running ? 'АКТИВЕН' : 'ОТКЛЮЧЕН'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#9d96a2', marginBottom: '12px' }}>
+                    Синхронная игра музыки по комнатам с сервером Snapcast (Home Assistant / Music Assistant).
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '8px' }}>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      style={{ fontSize: '0.8rem', padding: '6px 10px' }}
+                      value={streamingStatus.snapcast_server}
+                      onChange={(e) => setStreamingStatus({ ...streamingStatus, snapcast_server: e.target.value })}
+                      placeholder="IP Snapserver"
+                    />
+                    <input
+                      type="number"
+                      className="m3-input"
+                      style={{ fontSize: '0.8rem', padding: '6px 8px', width: '70px' }}
+                      value={streamingStatus.snapcast_port}
+                      onChange={(e) => setStreamingStatus({ ...streamingStatus, snapcast_port: parseInt(e.target.value) || 1704 })}
+                    />
+                    <button
+                      type="button"
+                      className={`m3-btn ${streamingStatus.snapcast_enabled ? 'm3-btn-tonal' : 'm3-btn-primary'}`}
+                      style={{ fontSize: '0.78rem', padding: '6px 12px', whiteSpace: 'nowrap' }}
+                      onClick={() => updateStreamingConfig({
+                        snapcast_enabled: !streamingStatus.snapcast_enabled,
+                        snapcast_server: streamingStatus.snapcast_server,
+                        snapcast_port: streamingStatus.snapcast_port,
+                      })}
+                      disabled={isStreamingSaving}
+                    >
+                      <span>{streamingStatus.snapcast_enabled ? 'Выкл' : 'Вкл'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Bluetooth A2DP Sink */}
+                <div style={{ background: '#17151b', borderRadius: '16px', padding: '16px', border: '1px solid #28242f' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, color: '#fff' }}>
+                      <span className="material-symbols-rounded" style={{ color: '#80deea' }}>bluetooth_audio</span>
+                      <span>Bluetooth Колонка (A2DP)</span>
+                    </div>
+                    <span className={`m3-badge ${streamingStatus.bluetooth_sink_enabled ? 'online' : ''}`} style={{
+                      background: streamingStatus.bluetooth_sink_enabled ? 'rgba(128, 222, 234, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                      color: streamingStatus.bluetooth_sink_enabled ? '#80deea' : '#888',
+                      fontSize: '0.74rem'
+                    }}>
+                      {streamingStatus.bluetooth_sink_enabled ? 'ОБНАРУЖЕНИЕ' : 'ВЫКЛ'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#9d96a2', marginBottom: '12px' }}>
+                    Слушайте музыку с телефона по обычному Bluetooth без интернета и Wi-Fi.
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <button
+                      type="button"
+                      className={`m3-btn ${streamingStatus.bluetooth_sink_enabled ? 'm3-btn-tonal' : 'm3-btn-primary'}`}
+                      style={{ fontSize: '0.8rem', padding: '8px 14px', width: '100%', justifyContent: 'center' }}
+                      onClick={() => toggleBtSink(!streamingStatus.bluetooth_sink_enabled)}
+                    >
+                      <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>
+                        {streamingStatus.bluetooth_sink_enabled ? 'bluetooth_disabled' : 'bluetooth_searching'}
+                      </span>
+                      <span>{streamingStatus.bluetooth_sink_enabled ? 'Отключить режим A2DP' : 'Сделать видимой для сопряжения'}</span>
+                    </button>
+                    {btSinkDiscoverableMsg && (
+                      <div style={{ fontSize: '0.74rem', color: '#81c784', textAlign: 'center' }}>
+                        {btSinkDiscoverableMsg}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
         {/* ----------------- TAB: ASSISTANT ----------------- */}
         {activeTab === 'assistant' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div className="m3-tab-view" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             {/* System Prompt Editor */}
             <div className="m3-surface-card">
               <div className="m3-card-header">
@@ -2717,9 +3569,893 @@ export default function App() {
           </div>
         )}
 
+        {/* ----------------- TAB: HOME ASSISTANT ----------------- */}
+        {activeTab === 'hass' && (
+          <div className="m3-tab-view" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Connection Banner */}
+            <div className="m3-surface-card">
+              <div className="m3-card-header" style={{ flexWrap: 'wrap', gap: '12px' }}>
+                <div className="m3-card-title">
+                  <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>home_iot_device</span>
+                  <span>Интеграция с Home Assistant</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <button
+                    type="button"
+                    className="m3-btn m3-btn-tonal"
+                    onClick={() => { fetchHassStatus(); fetchHassEntities(); }}
+                    disabled={hassLoading}
+                    style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                  >
+                    <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>refresh</span>
+                    <span>{hassLoading ? 'Обновление...' : 'Обновить'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="m3-btn m3-btn-outlined"
+                    onClick={() => window.open(hassUrlInput, '_blank')}
+                    style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                  >
+                    <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>open_in_new</span>
+                    <span>Веб-панель HA</span>
+                  </button>
+                </div>
+              </div>
+
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '12px 16px',
+                borderRadius: '14px',
+                background: hassStatus.connected ? 'rgba(76, 175, 80, 0.12)' : 'rgba(244, 67, 54, 0.12)',
+              }}>
+                <div style={{
+                  width: '12px',
+                  height: '12px',
+                  borderRadius: '50%',
+                  background: hassStatus.connected ? '#4caf50' : '#f44336',
+                  boxShadow: hassStatus.connected ? '0 0 10px #4caf50' : 'none',
+                }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.9rem', color: hassStatus.connected ? '#81c784' : '#e57373' }}>
+                    {hassStatus.connected ? 'Подключено к Home Assistant Core' : 'Отключено / Ошибка связи'}
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#9e97a3' }}>
+                    Адрес: {hassUrlInput || 'не указан'} • {hassEntities.length} сущностей доступно
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Station as Home Assistant Media Player */}
+            <div className="m3-surface-card">
+              <div className="m3-card-header" style={{ flexWrap: 'wrap', gap: '12px' }}>
+                <div className="m3-card-title">
+                  <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>speaker</span>
+                  <span>Сущность медиаплеера (media_player.station_lite)</span>
+                </div>
+                <button
+                  type="button"
+                  className="m3-btn m3-btn-tonal"
+                  onClick={syncHaMediaPlayer}
+                  disabled={isHaSyncing}
+                  style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                >
+                  <span className="material-symbols-rounded">sync</span>
+                  <span>{isHaSyncing ? 'Синхронизация...' : 'Синхронизировать сейчас'}</span>
+                </button>
+              </div>
+
+              <div style={{ fontSize: '0.82rem', color: '#9e97a3', lineHeight: 1.4, marginBottom: '14px' }}>
+                Станция регистрируется в Home Assistant как полноправная сущность <code>media_player.station_lite</code>.
+                Вы можете воспроизводить музыку, регулировать громкость и передавать голосовые объявления (TTS) через автоматизации Home Assistant.
+              </div>
+
+              <div style={{
+                background: '#17151a',
+                borderRadius: '14px',
+                padding: '14px',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: '12px',
+                marginBottom: '14px'
+              }}>
+                <div>
+                  <div style={{ fontSize: '0.72rem', color: '#8e8893' }}>Entity ID в HA:</div>
+                  <div style={{ fontWeight: 700, color: '#ffb4c2', fontFamily: 'monospace', marginTop: '2px' }}>
+                    media_player.station_lite
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.72rem', color: '#8e8893' }}>Текущий трек:</div>
+                  <div style={{ fontWeight: 600, color: '#fff', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {playerStatus.track || '—'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.72rem', color: '#8e8893' }}>Статус плеера:</div>
+                  <div style={{ fontWeight: 600, color: playerStatus.state === 'playing' ? '#81c784' : '#9e97a3', marginTop: '2px' }}>
+                    {playerStatus.state === 'playing' ? 'Воспроизведение' : (playerStatus.state === 'paused' ? 'Пауза' : 'Остановлен')}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.72rem', color: '#8e8893' }}>Громкость:</div>
+                  <div style={{ fontWeight: 600, color: '#fff', marginTop: '2px' }}>
+                    {playerStatus.volume}% (шаг {Math.round(playerStatus.volume / 10)}/10)
+                  </div>
+                </div>
+              </div>
+
+              {haSyncMessage && (
+                <div style={{
+                  fontSize: '0.82rem',
+                  padding: '8px 14px',
+                  borderRadius: '10px',
+                  background: haSyncMessage.includes('Успешно') ? 'rgba(76, 175, 80, 0.15)' : 'rgba(244, 67, 54, 0.15)',
+                  color: haSyncMessage.includes('Успешно') ? '#81c784' : '#e57373',
+                  marginBottom: '10px'
+                }}>
+                  {haSyncMessage}
+                </div>
+              )}
+
+              <div style={{ background: '#121015', borderRadius: '12px', padding: '12px', fontSize: '0.78rem', color: '#a49ea8' }}>
+                <div style={{ fontWeight: 700, color: '#ffb4c2', marginBottom: '4px' }}>💡 Пример использования в автоматизации Home Assistant:</div>
+                <code style={{ fontFamily: 'monospace', display: 'block', whiteSpace: 'pre-wrap', color: '#e0dbe3' }}>
+{`action: tts.speak
+target:
+  entity_id: tts.google_en_com
+data:
+  media_player_entity_id: media_player.station_lite
+  message: "Доброе утро! Температура за окном +18 градусов."`}
+                </code>
+              </div>
+            </div>
+
+            {/* Voice Command Testing Console */}
+            <div className="m3-surface-card">
+              <div className="m3-card-title">
+                <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>record_voice_over</span>
+                <span>Тестирование голосового управления (HA Assist)</span>
+              </div>
+              <div style={{ fontSize: '0.82rem', color: '#9e97a3', lineHeight: 1.4 }}>
+                Проверьте обработку команд умного дома через Home Assistant Conversation API. Если команда не относится к устройствам,
+                голосовой ассистент Станции автоматически передаст запрос в нейросеть (Gemini).
+              </div>
+
+              {/* Suggestions */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {[
+                  'Включи свет',
+                  'Выключи свет',
+                  'Какая фаза луны?',
+                  'Добавь молоко в список покупок',
+                ].map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className="m3-music-source-pill"
+                    style={{ fontSize: '0.78rem', padding: '6px 12px' }}
+                    onClick={() => setHassVoiceCommandInput(s)}
+                  >
+                    <span>{s}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Command Input Box */}
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <input
+                  type="text"
+                  className="m3-input"
+                  style={{ flex: 1 }}
+                  placeholder="Введите команду, например: включи свет на кухне..."
+                  value={hassVoiceCommandInput}
+                  onChange={(e) => setHassVoiceCommandInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleTestHassVoice();
+                  }}
+                />
+                <button
+                  type="button"
+                  className="m3-btn m3-btn-primary"
+                  onClick={handleTestHassVoice}
+                  disabled={hassVoiceTesting || !hassVoiceCommandInput.trim()}
+                  style={{ padding: '0 20px', whiteSpace: 'nowrap' }}
+                >
+                  <span className="material-symbols-rounded">send</span>
+                  <span>{hassVoiceTesting ? 'Обработка...' : 'Отправить'}</span>
+                </button>
+              </div>
+
+              {/* Voice Result Display */}
+              {hassVoiceResult && (
+                <div style={{
+                  background: '#1d1a22',
+                  borderRadius: '14px',
+                  padding: '14px 18px',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                  borderLeft: '4px solid #ffb4c2',
+                }}>
+                  <span className="material-symbols-rounded" style={{ color: '#ffb4c2', marginTop: '2px' }}>
+                    forum
+                  </span>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: '#9e97a3', textTransform: 'uppercase', fontWeight: 700 }}>
+                      Ответ голосового движка Assist:
+                    </div>
+                    <div style={{ fontSize: '0.95rem', color: '#ffffff', marginTop: '4px' }}>
+                      {hassVoiceResult}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Smart Devices Dashboard */}
+            <div className="m3-surface-card">
+              <div className="m3-card-header" style={{ flexWrap: 'wrap', gap: '10px' }}>
+                <div className="m3-card-title">
+                  <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>devices</span>
+                  <span>Устройства и датчики ({hassEntities.length})</span>
+                </div>
+
+                {/* Domain filter tabs */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {[
+                    { id: 'all', label: 'Все' },
+                    { id: 'light', label: 'Свет' },
+                    { id: 'switch', label: 'Розетки/Реле' },
+                    { id: 'sensor', label: 'Датчики' },
+                    { id: 'todo', label: 'Списки' },
+                    { id: 'person', label: 'Зоны/Люди' },
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      className={`m3-music-source-pill ${hassFilterDomain === f.id ? 'active' : ''}`}
+                      style={{ fontSize: '0.75rem', padding: '6px 12px' }}
+                      onClick={() => setHassFilterDomain(f.id)}
+                    >
+                      <span>{f.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Entities Grid */}
+              {hassLoading ? (
+                <div style={{ textAlign: 'center', padding: '30px', color: '#9e97a3' }}>
+                  Загрузка сущностей Home Assistant...
+                </div>
+              ) : hassEntities.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '30px', color: '#9e97a3' }}>
+                  Нет обнаруженных сущностей. Проверьте подключение и токен доступа.
+                </div>
+              ) : (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                  gap: '12px',
+                }}>
+                  {hassEntities
+                    .filter((e) => {
+                      if (hassFilterDomain === 'all') return true;
+                      if (hassFilterDomain === 'light') return e.entity_id.startsWith('light.');
+                      if (hassFilterDomain === 'switch') return e.entity_id.startsWith('switch.');
+                      if (hassFilterDomain === 'sensor') return e.entity_id.startsWith('sensor.') || e.entity_id.startsWith('sun.');
+                      if (hassFilterDomain === 'todo') return e.entity_id.startsWith('todo.');
+                      if (hassFilterDomain === 'person') return e.entity_id.startsWith('person.') || e.entity_id.startsWith('zone.');
+                      return true;
+                    })
+                    .map((entity) => {
+                      const domain = entity.entity_id.split('.')[0];
+                      const isLight = domain === 'light';
+                      const isSwitch = domain === 'switch';
+                      const isOn = entity.state === 'on';
+
+                      let icon = 'widgets';
+                      if (isLight) icon = 'lightbulb';
+                      else if (isSwitch) icon = 'power';
+                      else if (domain === 'sun') icon = 'wb_sunny';
+                      else if (domain === 'sensor') icon = 'sensors';
+                      else if (domain === 'todo') icon = 'checklist';
+                      else if (domain === 'person') icon = 'person';
+                      else if (domain === 'zone') icon = 'home';
+                      else if (domain === 'conversation') icon = 'forum';
+
+                      return (
+                        <div
+                          key={entity.entity_id}
+                          style={{
+                            background: '#1a171f',
+                            borderRadius: '16px',
+                            padding: '14px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            gap: '10px',
+                            border: isOn ? '1px solid rgba(255, 180, 194, 0.4)' : '1px solid transparent',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                              width: '38px',
+                              height: '38px',
+                              borderRadius: '12px',
+                              background: isOn ? 'var(--md-sys-color-primary)' : '#28252f',
+                              color: isOn ? 'var(--md-sys-color-on-primary)' : '#c7c2c9',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}>
+                              <span className="material-symbols-rounded" style={{ fontSize: '20px' }}>
+                                {icon}
+                              </span>
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{
+                                fontWeight: 600,
+                                fontSize: '0.88rem',
+                                color: '#ffffff',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}>
+                                {entity.attributes?.friendly_name || entity.entity_id}
+                              </div>
+                              <div style={{
+                                fontSize: '0.72rem',
+                                color: '#8e8893',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}>
+                                {entity.entity_id}
+                              </div>
+                            </div>
+                            <div style={{
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              padding: '4px 10px',
+                              borderRadius: '9999px',
+                              background: isOn ? 'rgba(255, 180, 194, 0.2)' : '#232029',
+                              color: isOn ? '#ffb4c2' : '#a39da8',
+                            }}>
+                              {entity.state}
+                              {entity.attributes?.unit_of_measurement ? ` ${entity.attributes.unit_of_measurement}` : ''}
+                            </div>
+                          </div>
+
+                          {/* Quick Actions for Light / Switch */}
+                          {(isLight || isSwitch) && (
+                            <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                              <button
+                                type="button"
+                                className="m3-btn m3-btn-tonal"
+                                style={{ flex: 1, padding: '6px 0', fontSize: '0.75rem' }}
+                                onClick={() => handleCallHassService(domain, 'turn_on', entity.entity_id)}
+                              >
+                                Вкл
+                              </button>
+                              <button
+                                type="button"
+                                className="m3-btn m3-btn-outlined"
+                                style={{ flex: 1, padding: '6px 0', fontSize: '0.75rem' }}
+                                onClick={() => handleCallHassService(domain, 'turn_off', entity.entity_id)}
+                              >
+                                Выкл
+                              </button>
+                              <button
+                                type="button"
+                                className="m3-btn m3-btn-outlined"
+                                style={{ flex: 1, padding: '6px 0', fontSize: '0.75rem' }}
+                                onClick={() => handleCallHassService(domain, 'toggle', entity.entity_id)}
+                              >
+                                Перекл
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+
+            {/* Settings & Credentials */}
+            <div className="m3-surface-card">
+              <div className="m3-card-title">
+                <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>tune</span>
+                <span>Настройки подключения Home Assistant</span>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {/* Enable toggle */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '0.9rem', color: '#ffffff' }}>
+                      Включить интеграцию с Home Assistant
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#9e97a3' }}>
+                      Разрешить голосовой Станции Lite взаимодействовать с умным домом
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={hassEnabledInput}
+                    onChange={(e) => setHassEnabledInput(e.target.checked)}
+                    style={{ width: '20px', height: '20px', cursor: 'pointer', accentColor: '#ffb4c2' }}
+                  />
+                </div>
+
+                {/* Conversation API toggle */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '0.9rem', color: '#ffffff' }}>
+                      Голосовой ассистент HA Assist (/api/conversation/process)
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#9e97a3' }}>
+                      Маршрутизировать голосовые фразы сначала в Assist, а при нераспознавании передавать в Gemini
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={hassConversationApiInput}
+                    onChange={(e) => setHassConversationApiInput(e.target.checked)}
+                    style={{ width: '20px', height: '20px', cursor: 'pointer', accentColor: '#ffb4c2' }}
+                  />
+                </div>
+
+                {/* HA Server URL */}
+                <div className="m3-form-group">
+                  <label style={{ fontSize: '0.8rem', color: '#ded7e0' }}>Адрес сервера Home Assistant (URL):</label>
+                  <input
+                    type="text"
+                    className="m3-input"
+                    placeholder="http://192.168.0.106:8123"
+                    value={hassUrlInput}
+                    onChange={(e) => setHassUrlInput(e.target.value)}
+                  />
+                  <div style={{ fontSize: '0.72rem', color: '#9e97a3' }}>
+                    Для контейнера в локальной сети указывайте IP хоста с портом (например: http://192.168.0.106:8123).
+                  </div>
+                </div>
+
+                {/* HA Token */}
+                <div className="m3-form-group">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: '0.8rem', color: '#ded7e0' }}>Долговечный токен доступа (Long-Lived Access Token):</label>
+                    <button
+                      type="button"
+                      className="m3-btn m3-btn-outlined"
+                      style={{ fontSize: '0.7rem', padding: '2px 8px' }}
+                      onClick={() => setHassShowToken(!hassShowToken)}
+                    >
+                      {hassShowToken ? 'Скрыть' : 'Показать'}
+                    </button>
+                  </div>
+                  <input
+                    type={hassShowToken ? 'text' : 'password'}
+                    className="m3-input"
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+                    value={hassTokenInput}
+                    onChange={(e) => setHassTokenInput(e.target.value)}
+                  />
+                  <div style={{ fontSize: '0.72rem', color: '#9e97a3' }}>
+                    Генерируется в HA: Профиль пользователя → Долговечные токены доступа → Создать токен.
+                  </div>
+                </div>
+
+                {/* Save HA Settings button */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
+                  <button
+                    type="button"
+                    className="m3-btn m3-btn-primary"
+                    onClick={handleSaveHassConfig}
+                    style={{ minWidth: '240px', padding: '12px 24px' }}
+                  >
+                    <span className="material-symbols-rounded">save</span>
+                    <span>Сохранить настройки Home Assistant</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ----------------- TAB: CLOCK (Будильники и таймеры) ----------------- */}
+        {activeTab === 'clock' && (
+          <div className="m3-tab-view" style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+            {/* Header & Quick Tips Card */}
+            <div className="m3-surface-card" style={{ background: '#1d1b22' }}>
+              <div className="m3-card-header" style={{ flexWrap: 'wrap', gap: '12px' }}>
+                <div className="m3-card-title">
+                  <span className="material-symbols-rounded" style={{ color: '#f8c057', fontSize: '28px' }}>alarm</span>
+                  <div>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 800 }}>Будильники и таймеры Станции</div>
+                    <div style={{ fontSize: '0.8rem', color: '#a49ea8', fontWeight: 400 }}>
+                      Управление таймерами, будильниками и сигналами с аппаратным выводом звука
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  {isAlarmRinging && (
+                    <button
+                      type="button"
+                      onClick={handleStopRinging}
+                      style={{
+                        background: '#e91e63',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '12px',
+                        padding: '8px 16px',
+                        fontWeight: 700,
+                        fontSize: '0.82rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        animation: 'pulse 1s infinite'
+                      }}
+                    >
+                      <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>stop</span>
+                      <span>ВЫКЛЮЧИТЬ ЗВОНОК</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="m3-btn"
+                    onClick={() => { fetchTimers(); fetchAlarms(); }}
+                    style={{ padding: '8px 14px', fontSize: '0.8rem' }}
+                  >
+                    <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>refresh</span>
+                    <span>Обновить</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Voice Command Hints */}
+              <div style={{ background: '#161419', borderRadius: '14px', padding: '12px 16px', marginTop: '14px' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#ffb4c2', textTransform: 'uppercase', marginBottom: '8px' }}>
+                  Голосовые команды ассистенту:
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '8px', fontSize: '0.82rem', color: '#c7c2c9' }}>
+                  <div>🎙️ <i>«Поставь таймер на 5 минут»</i></div>
+                  <div>🎙️ <i>«Сколько осталось на таймере?»</i></div>
+                  <div>🎙️ <i>«Отмени таймер»</i></div>
+                  <div>🎙️ <i>«Поставь будильник на 7:30 утра»</i></div>
+                  <div>🎙️ <i>«Выключи будильник»</i></div>
+                  <div>🎙️ <i>«Стоп»</i> (остановить звонящий сигнал)</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Timers Section */}
+            <div className="m3-surface-card">
+              <div className="m3-card-header">
+                <div className="m3-card-title">
+                  <span className="material-symbols-rounded" style={{ color: '#78dc96' }}>timer</span>
+                  <span>Таймеры обратного отсчета</span>
+                </div>
+                {timers.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleCancelAllTimers}
+                    style={{
+                      background: 'rgba(255, 68, 68, 0.15)',
+                      color: '#ff6b6b',
+                      border: 'none',
+                      borderRadius: '10px',
+                      padding: '6px 12px',
+                      fontWeight: 700,
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Отменить все ({timers.length})
+                  </button>
+                )}
+              </div>
+
+              {/* Quick Presets */}
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '0.78rem', color: '#8e8893', fontWeight: 600, marginBottom: '6px' }}>
+                  Быстрый запуск таймера:
+                </div>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {[1, 3, 5, 10, 15, 20, 30, 45, 60].map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className="m3-btn"
+                      style={{ padding: '8px 14px', fontSize: '0.82rem', fontWeight: 700 }}
+                      onClick={() => handleCreateTimer(m, `${m} мин`)}
+                    >
+                      +{m} мин
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Custom Timer Input Form */}
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '20px', background: '#161419', padding: '14px', borderRadius: '16px' }}>
+                <div style={{ flex: '0 0 120px' }}>
+                  <label style={{ fontSize: '0.74rem', color: '#8e8893', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                    Минуты:
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={1440}
+                    value={newTimerMins}
+                    onChange={(e) => setNewTimerMins(Number(e.target.value))}
+                    className="m3-input"
+                    style={{ textAlign: 'center', fontWeight: 700 }}
+                  />
+                </div>
+
+                <div style={{ flex: 1, minWidth: '180px' }}>
+                  <label style={{ fontSize: '0.74rem', color: '#8e8893', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                    Название / Метка (опционально):
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Например: Чай, Пицца, Варка яиц..."
+                    value={newTimerLabel}
+                    onChange={(e) => setNewTimerLabel(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateTimer(newTimerMins, newTimerLabel)}
+                    className="m3-input"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  className="m3-btn m3-btn-primary"
+                  onClick={() => handleCreateTimer(newTimerMins, newTimerLabel)}
+                  style={{ padding: '12px 22px' }}
+                >
+                  <span className="material-symbols-rounded">play_arrow</span>
+                  <span>Запустить таймер</span>
+                </button>
+              </div>
+
+              {/* Active Timers List */}
+              {timers.length > 0 ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '14px' }}>
+                  {timers.map((timer) => {
+                    const remSec = timer.remaining_secs;
+                    const mins = Math.floor(remSec / 60);
+                    const secs = remSec % 60;
+                    const timeStr = `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
+
+                    return (
+                      <div
+                        key={timer.id}
+                        style={{
+                          background: timer.is_ringing ? 'linear-gradient(135deg, rgba(233,30,99,0.3), rgba(176,0,32,0.3))' : '#161419',
+                          border: timer.is_ringing ? '1px solid #e91e63' : '1px solid rgba(255, 255, 255, 0.06)',
+                          borderRadius: '16px',
+                          padding: '16px 18px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '12px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff' }}>
+                            {timer.label || 'Таймер'}
+                          </div>
+                          <span
+                            style={{
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                              padding: '3px 8px',
+                              borderRadius: '8px',
+                              background: timer.is_ringing ? '#e91e63' : 'rgba(120, 220, 150, 0.15)',
+                              color: timer.is_ringing ? '#fff' : '#78dc96',
+                            }}
+                          >
+                            {timer.is_ringing ? 'ВРЕМЯ ВЫШЛО!' : 'АКТИВЕН'}
+                          </span>
+                        </div>
+
+                        <div style={{ fontSize: '2.4rem', fontWeight: 800, color: timer.is_ringing ? '#ff5252' : '#fff', letterSpacing: '1px', fontFamily: 'monospace' }}>
+                          {timeStr}
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.75rem', color: '#8e8893' }}>
+                            Всего: {Math.round(timer.duration_secs / 60)} мин
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleCancelTimer(timer.id)}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: '#ff6b6b',
+                              fontSize: '0.8rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <span className="material-symbols-rounded" style={{ fontSize: '16px' }}>close</span>
+                            <span>Отменить</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ padding: '24px', textAlign: 'center', color: '#8e8893', background: '#161419', borderRadius: '16px' }}>
+                  <span className="material-symbols-rounded" style={{ fontSize: '36px', opacity: 0.4, display: 'block', marginBottom: '8px' }}>timer_off</span>
+                  <span>Сейчас нет активных таймеров. Выберите пресет выше или задайте время голосом.</span>
+                </div>
+              )}
+            </div>
+
+            {/* Alarms Section */}
+            <div className="m3-surface-card">
+              <div className="m3-card-header">
+                <div className="m3-card-title">
+                  <span className="material-symbols-rounded" style={{ color: '#00e5ff' }}>alarm_add</span>
+                  <span>Будильники Станции</span>
+                </div>
+              </div>
+
+              {/* Add Alarm Form */}
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '20px', background: '#161419', padding: '16px', borderRadius: '16px' }}>
+                <div style={{ flex: '0 0 140px' }}>
+                  <label style={{ fontSize: '0.74rem', color: '#8e8893', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                    Время (ЧЧ:ММ):
+                  </label>
+                  <input
+                    type="time"
+                    value={newAlarmTime}
+                    onChange={(e) => setNewAlarmTime(e.target.value)}
+                    className="m3-input"
+                    style={{ fontWeight: 700, fontSize: '1rem', textAlign: 'center' }}
+                  />
+                </div>
+
+                <div style={{ flex: '0 0 160px' }}>
+                  <label style={{ fontSize: '0.74rem', color: '#8e8893', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                    Повтор:
+                  </label>
+                  <select
+                    className="m3-quick-select"
+                    value={newAlarmRepeat}
+                    onChange={(e) => setNewAlarmRepeat(e.target.value)}
+                    style={{ padding: '10px 12px', width: '100%' }}
+                  >
+                    <option value="once">Однократно</option>
+                    <option value="daily">Каждый день</option>
+                    <option value="weekdays">По будням (Пн-Пт)</option>
+                    <option value="weekends">По выходным (Сб-Вс)</option>
+                  </select>
+                </div>
+
+                <div style={{ flex: 1, minWidth: '180px' }}>
+                  <label style={{ fontSize: '0.74rem', color: '#8e8893', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                    Метка:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Будильник, Подъем, Работа..."
+                    value={newAlarmLabel}
+                    onChange={(e) => setNewAlarmLabel(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateAlarm()}
+                    className="m3-input"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  className="m3-btn m3-btn-primary"
+                  onClick={handleCreateAlarm}
+                  style={{ padding: '12px 22px' }}
+                >
+                  <span className="material-symbols-rounded">add_alarm</span>
+                  <span>Добавить будильник</span>
+                </button>
+              </div>
+
+              {/* Alarms List */}
+              {alarms.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {alarms.map((alarm) => (
+                    <div
+                      key={alarm.id}
+                      style={{
+                        background: '#161419',
+                        borderRadius: '16px',
+                        padding: '14px 18px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        border: '1px solid rgba(255, 255, 255, 0.05)',
+                        opacity: alarm.enabled ? 1 : 0.6,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                        <div style={{ fontSize: '1.8rem', fontWeight: 800, color: alarm.enabled ? '#fff' : '#8e8893', fontFamily: 'monospace' }}>
+                          {alarm.time}
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#fff' }}>
+                            {alarm.label || 'Будильник'}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: '#ffb4c2', marginTop: '2px' }}>
+                            {alarm.repeat === 'daily' ? 'Каждый день' : alarm.repeat === 'weekdays' ? 'По будням' : alarm.repeat === 'weekends' ? 'По выходным' : 'Однократно'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleAlarm(alarm.id, alarm.enabled)}
+                          style={{
+                            background: alarm.enabled ? '#78dc96' : 'rgba(255, 255, 255, 0.1)',
+                            color: alarm.enabled ? '#0a3818' : '#8e8893',
+                            border: 'none',
+                            borderRadius: '12px',
+                            padding: '8px 16px',
+                            fontWeight: 700,
+                            fontSize: '0.78rem',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>
+                            {alarm.enabled ? 'toggle_on' : 'toggle_off'}
+                          </span>
+                          <span>{alarm.enabled ? 'ВКЛ' : 'ВЫКЛ'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteAlarm(alarm.id)}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#8e8893',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            padding: '6px',
+                          }}
+                          title="Удалить будильник"
+                        >
+                          <span className="material-symbols-rounded" style={{ fontSize: '20px' }}>delete</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ padding: '24px', textAlign: 'center', color: '#8e8893', background: '#161419', borderRadius: '16px' }}>
+                  <span className="material-symbols-rounded" style={{ fontSize: '36px', opacity: 0.4, display: 'block', marginBottom: '8px' }}>alarm_off</span>
+                  <span>Будильников пока нет. Создайте новый выше или скажите колонке «Поставь будильник на 7 утра».</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ----------------- TAB: LED ----------------- */}
         {activeTab === 'led' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div className="m3-tab-view" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <div className="m3-surface-card">
               <div className="m3-card-title">
                 <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>palette</span>
@@ -2829,7 +4565,7 @@ export default function App() {
 
         {/* ----------------- TAB: TERMINAL ----------------- */}
         {activeTab === 'terminal' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div className="m3-tab-view" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <div className="m3-surface-card">
               <div className="m3-card-title">
                 <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>terminal</span>
@@ -2883,7 +4619,7 @@ export default function App() {
 
         {/* ----------------- TAB: SETTINGS ----------------- */}
         {activeTab === 'settings' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div className="m3-tab-view" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
             {/* Wi-Fi Management Card */}
             <div className="m3-surface-card">
@@ -3246,6 +4982,89 @@ export default function App() {
               </div>
             </div>
 
+            {/* Sound Packs & System Sounds */}
+            <div className="m3-surface-card">
+              <div className="m3-card-header" style={{ flexWrap: 'wrap', gap: '12px' }}>
+                <div className="m3-card-title">
+                  <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>music_cast</span>
+                  <span>Звуковые пакеты и системные отклики (Sound Packs)</span>
+                </div>
+                <button
+                  type="button"
+                  className="m3-btn m3-btn-tonal"
+                  onClick={fetchSoundPacks}
+                  style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                >
+                  <span className="material-symbols-rounded">refresh</span>
+                  <span>Обновить</span>
+                </button>
+              </div>
+
+              <div style={{ fontSize: '0.82rem', color: '#9d96a2', lineHeight: 1.4, marginBottom: '14px' }}>
+                Выберите звуковую тему для сигнала пробуждения (активации), таймеров и уведомлений.
+                Все звуки генерируются математически и синтезируются мгновенно без занимания места во флеш-памяти.
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
+                {soundPacks.map((pack) => {
+                  const isActive = pack.id === activeSoundPack;
+                  const isPreviewing = isPlayingSoundPreview === pack.id;
+                  return (
+                    <div
+                      key={pack.id}
+                      style={{
+                        background: isActive ? 'rgba(255, 180, 194, 0.08)' : '#17151a',
+                        border: isActive ? '1px solid #ffb4c2' : '1px solid #28242f',
+                        borderRadius: '16px',
+                        padding: '16px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: '12px',
+                        transition: 'all 0.2s ease',
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                          <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.92rem' }}>{pack.name}</span>
+                          {isActive && (
+                            <span className="m3-badge online" style={{ fontSize: '0.72rem' }}>АКТИВЕН</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: '#a49ea8', lineHeight: 1.4 }}>
+                          {pack.description}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <button
+                          type="button"
+                          className="m3-btn m3-btn-outlined"
+                          style={{ fontSize: '0.75rem', padding: '6px 12px', flex: 1, justifyContent: 'center' }}
+                          onClick={() => previewSound(pack.id, 'activation')}
+                        >
+                          <span className="material-symbols-rounded" style={{ fontSize: '16px' }}>
+                            {isPreviewing ? 'graphic_eq' : 'volume_up'}
+                          </span>
+                          <span>{isPreviewing ? 'Воспроизведение...' : 'Прослушать'}</span>
+                        </button>
+                        {!isActive && (
+                          <button
+                            type="button"
+                            className="m3-btn m3-btn-primary"
+                            style={{ fontSize: '0.75rem', padding: '6px 14px' }}
+                            onClick={() => selectSoundPack(pack.id)}
+                          >
+                            <span>Выбрать</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Station IP & Save Button */}
             <div className="m3-surface-card">
               <div className="m3-card-title">
@@ -3277,7 +5096,7 @@ export default function App() {
 
         {/* ===================== TAB: GUIDE & HELP ===================== */}
         {activeTab === 'guide' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+          <div className="m3-tab-view" style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
             
             {/* Header Hero Card */}
             <div className="m3-surface-card" style={{ background: '#1c1a22' }}>

@@ -267,6 +267,20 @@ impl PlayerService {
         (clamped_pos, duration)
     }
 
+    /// Returns a full snapshot of the player state for Home Assistant and external sinks.
+    pub async fn get_snapshot(&self) -> (String, String, String, Option<String>, u64, u64) {
+        let st = match self.get_state().await {
+            PlaybackState::Playing => "playing",
+            PlaybackState::Paused => "paused",
+            PlaybackState::Stopped => "idle",
+        }.to_string();
+        let track = self.get_current_track().await;
+        let artist = self.get_current_artist().await;
+        let art = self.get_current_artwork().await;
+        let (pos, dur) = self.get_position_and_duration().await;
+        (st, track, artist, art, dur, pos)
+    }
+
     /// Cleanly kills running playback processes and allows the Linux ALSA driver
     /// 80ms to completely release the hw:0,0 hardware PCM device.
     async fn clean_stop_current_process(&self) {

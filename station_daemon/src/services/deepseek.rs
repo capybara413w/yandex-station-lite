@@ -9,12 +9,26 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HaCall {
+    pub domain: String,
+    pub service: String,
+    #[serde(default)]
+    pub service_data: serde_json::Value,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeepSeekResponse {
     pub text: String,
     pub color: [u8; 3],
     pub action: String,
     pub song: String,
+    #[serde(default)]
+    pub ha_calls: Vec<HaCall>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timer_call: Option<crate::services::timer_alarm::TimerCall>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alarm_call: Option<crate::services::timer_alarm::AlarmCall>,
 }
 
 pub struct DeepSeekService {
@@ -53,6 +67,16 @@ impl DeepSeekService {
         &self,
         prompt: &str,
         history: &[ChatMessageItem],
+    ) -> Result<DeepSeekResponse, String> {
+        self.query_with_context(prompt, history, "").await
+    }
+
+    /// Queries active LLM provider with conversation history and dynamic Smart Home context.
+    pub async fn query_with_context(
+        &self,
+        prompt: &str,
+        history: &[ChatMessageItem],
+        smart_home_context: &str,
     ) -> Result<DeepSeekResponse, String> {
         let (
             provider,
@@ -161,7 +185,7 @@ impl DeepSeekService {
                     if !cfg.deepseek.gemini_model.is_empty() {
                         cfg.deepseek.gemini_model.clone()
                     } else {
-                        "gemini-3.5-flash".to_string()
+                        "gemini-3.8-flash".to_string()
                     },
                 ),
                 "perplexity" => (
@@ -206,6 +230,23 @@ impl DeepSeekService {
             )
         };
 
+        let effective_system_prompt = {
+            let base = if system_prompt.trim().is_empty() {
+                "Ты — умный голосовой ассистент смарт-колонки с поддержкой музыки, светодиодной подсветки и Умного Дома (Home Assistant).".to_string()
+            } else {
+                system_prompt.clone()
+            };
+            let mut prompt_full = format!(
+                "{}\n\nВАЖНО: Все голосовые команды и действия выполняются СТРОГО через тебя! Отвечай СТРОГО валидным JSON объектом (без markdown-оберток ```json):\n{{\n  \"text\": \"краткий естественный ответ для озвучки (1-2 предложения)\",\n  \"color\": [R, G, B],\n  \"action\": \"play\" | \"stop\" | \"resume\" | \"none\",\n  \"song\": \"название трека (только если action=play)\",\n  \"ha_calls\": [\n    {{\"domain\": \"light|switch|...\", \"service\": \"turn_on|turn_off|toggle\", \"service_data\": {{\"entity_id\": \"...\"}}}}\n  ],\n  \"timer_call\": null | {{\"action\": \"set\" | \"cancel\" | \"cancel_all\", \"seconds\": 300, \"label\": \"таймер\"}},\n  \"alarm_call\": null | {{\"action\": \"set\" | \"cancel\", \"time\": \"08:00\", \"label\": \"будильник\"}}\n}}",
+                base
+            );
+            if !smart_home_context.is_empty() {
+                prompt_full.push_str("\n\n");
+                prompt_full.push_str(smart_home_context);
+            }
+            prompt_full
+        };
+
         // 1. Direct dispatch to dedicated LlmClient implementations
         if provider == "openrouter" {
             let client = OpenRouterLlmClient::new(
@@ -216,7 +257,7 @@ impl DeepSeekService {
                 max_tokens,
                 extra_payload,
             );
-            return client.query_with_history(prompt, &system_prompt, history).await;
+            return client.query_with_history(prompt, &effective_system_prompt, history).await;
         }
 
         if provider == "cloudflare" {
@@ -237,7 +278,7 @@ impl DeepSeekService {
                 model_name,
                 extra_payload,
             );
-            return client.query_with_history(prompt, &system_prompt, history).await;
+            return client.query_with_history(prompt, &effective_system_prompt, history).await;
         }
 
         if provider == "custom" || provider == "local" {
@@ -250,7 +291,7 @@ impl DeepSeekService {
                 max_tokens,
                 extra_payload,
             );
-            return client.query_with_history(prompt, &system_prompt, history).await;
+            return client.query_with_history(prompt, &effective_system_prompt, history).await;
         }
 
         if api_key.is_empty() {
@@ -267,20 +308,6 @@ impl DeepSeekService {
             "together" => "https://api.together.xyz/v1/chat/completions".to_string(),
             "anthropic" => "https://api.anthropic.com/v1/messages".to_string(),
             _ => "https://api.deepseek.com/chat/completions".to_string(),
-        };
-
-        let effective_system_prompt = if system_prompt.to_lowercase().contains("json") {
-            system_prompt.clone()
-        } else {
-            let base = if system_prompt.trim().is_empty() {
-                "Ты — умный голосовой ассистент смарт-колонки с поддержкой управления музыкой и светодиодной подсветкой.".to_string()
-            } else {
-                system_prompt.clone()
-            };
-            format!(
-                "{}\n\nВАЖНО: Отвечай строго валидным JSON объектом (JSON format): {{\"text\": \"...\", \"color\": [R, G, B], \"action\": \"play\" | \"stop\" | \"resume\" | \"none\", \"song\": \"...\"}}",
-                base
-            )
         };
 
         let start_idx = if history.len() > 14 { history.len() - 14 } else { 0 };
@@ -346,6 +373,14 @@ impl DeepSeekService {
 
         // Merge extra_payload into body
         merge_extra_payload(&mut body, extra_payload.as_ref());
+
+        if provider == "gemini" {
+            if let Some(obj) = body.as_object_mut() {
+                obj.remove("repetition_penalty");
+                obj.remove("presence_penalty");
+                obj.remove("frequency_penalty");
+            }
+        }
 
         let mut req = self
             .client
@@ -445,41 +480,16 @@ impl DeepSeekService {
 
     fn fallback_response(&self, prompt: &str) -> DeepSeekResponse {
         let p_lower = prompt.to_lowercase();
-        if p_lower.contains("синий") || p_lower.contains("blue") {
-            DeepSeekResponse {
-                text: "Включаю синюю подсветку.".to_string(),
-                color: [0, 80, 255],
-                action: "none".to_string(),
-                song: String::new(),
-            }
+        let (text, color, action, song) = if p_lower.contains("синий") || p_lower.contains("blue") {
+            ("Включаю синюю подсветку.".to_string(), [0, 80, 255], "none".to_string(), String::new())
         } else if p_lower.contains("красный") || p_lower.contains("red") {
-            DeepSeekResponse {
-                text: "Включаю красный цвет.".to_string(),
-                color: [255, 0, 0],
-                action: "none".to_string(),
-                song: String::new(),
-            }
+            ("Включаю красный цвет.".to_string(), [255, 0, 0], "none".to_string(), String::new())
         } else if p_lower.contains("зеленый") || p_lower.contains("зелёный") || p_lower.contains("green") {
-            DeepSeekResponse {
-                text: "Включаю зеленый цвет.".to_string(),
-                color: [0, 255, 0],
-                action: "none".to_string(),
-                song: String::new(),
-            }
+            ("Включаю зеленый цвет.".to_string(), [0, 255, 0], "none".to_string(), String::new())
         } else if p_lower.contains("стоп") || p_lower.contains("выключи") || p_lower.contains("останови") {
-            DeepSeekResponse {
-                text: "Останавливаю воспроизведение музыки.".to_string(),
-                color: [0, 150, 255],
-                action: "stop".to_string(),
-                song: String::new(),
-            }
+            ("Останавливаю воспроизведение музыки.".to_string(), [0, 150, 255], "stop".to_string(), String::new())
         } else if p_lower.contains("продолжи") || p_lower.contains("возобнови") {
-            DeepSeekResponse {
-                text: "Продолжаю воспроизведение.".to_string(),
-                color: [0, 255, 100],
-                action: "resume".to_string(),
-                song: String::new(),
-            }
+            ("Продолжаю воспроизведение.".to_string(), [0, 255, 100], "resume".to_string(), String::new())
         } else if p_lower.contains("включи") || p_lower.contains("сыграй") || p_lower.contains("поставь") {
             let song = prompt
                 .replace("включи", "")
@@ -493,19 +503,19 @@ impl DeepSeekService {
             } else {
                 song
             };
-            DeepSeekResponse {
-                text: format!("Включаю {}.", query),
-                color: [180, 0, 255],
-                action: "play".to_string(),
-                song: query,
-            }
+            (format!("Включаю {}.", query), [180, 0, 255], "play".to_string(), query)
         } else {
-            DeepSeekResponse {
-                text: format!("Яндекс Станция Лайт слушает: {}.", prompt),
-                color: [0, 150, 255],
-                action: "none".to_string(),
-                song: String::new(),
-            }
+            (format!("Яндекс Станция Лайт слушает: {}.", prompt), [0, 150, 255], "none".to_string(), String::new())
+        };
+
+        DeepSeekResponse {
+            text,
+            color,
+            action,
+            song,
+            ha_calls: Vec::new(),
+            timer_call: None,
+            alarm_call: None,
         }
     }
 }

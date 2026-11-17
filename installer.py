@@ -906,11 +906,6 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       padding: 0;
       font-family: var(--md-sys-typescale-font);
       -webkit-font-smoothing: antialiased;
-      box-shadow: none !important;
-      text-shadow: none !important;
-      filter: none !important;
-      border: none !important;
-      outline: none !important;
     }
 
     body {
@@ -922,6 +917,72 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       position: relative;
     }
 
+    /* Keyframe Animations */
+    @keyframes m3FadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(16px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes statusBreathe {
+      0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(120, 220, 150, 0.55);
+      }
+      50% {
+        transform: scale(1.15);
+        box-shadow: 0 0 0 7px rgba(120, 220, 150, 0);
+      }
+    }
+
+    @keyframes statusBreatheError {
+      0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(255, 180, 171, 0.55);
+      }
+      50% {
+        transform: scale(1.15);
+        box-shadow: 0 0 0 7px rgba(255, 180, 171, 0);
+      }
+    }
+
+    @keyframes ambientFloat1 {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(25px, -20px) scale(1.04); }
+    }
+
+    @keyframes ambientFloat2 {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(-20px, 25px) scale(1.03); }
+    }
+
+    @keyframes modalBackdropFade {
+      from {
+        opacity: 0;
+        backdrop-filter: blur(0px);
+      }
+      to {
+        opacity: 1;
+        backdrop-filter: blur(10px);
+      }
+    }
+
+    @keyframes modalPopIn {
+      from {
+        opacity: 0;
+        transform: scale(0.92) translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+
     .m3-root-wrapper {
       position: relative;
       min-height: 100vh;
@@ -931,7 +992,7 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       isolation: isolate;
     }
 
-    /* M3 Organic Background Shapes */
+    /* M3 Organic Background Shapes with Ambient Float */
     .m3-bg-shapes-layer {
       position: fixed;
       inset: 0;
@@ -947,6 +1008,7 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       pointer-events: none;
       user-select: none;
       opacity: 0.55;
+      will-change: transform;
     }
 
     .m3-bg-blob-top-right {
@@ -954,6 +1016,7 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       right: -80px;
       width: 620px;
       height: 520px;
+      animation: ambientFloat1 24s ease-in-out infinite;
     }
 
     .m3-bg-blob-bottom-right {
@@ -961,6 +1024,7 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       right: -80px;
       width: 560px;
       height: 480px;
+      animation: ambientFloat2 28s ease-in-out infinite;
     }
 
     .m3-bg-blob-bottom-left {
@@ -968,6 +1032,7 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       left: -40px;
       width: 500px;
       height: 420px;
+      animation: ambientFloat1 22s ease-in-out infinite;
     }
 
     .material-symbols-rounded {
@@ -996,6 +1061,7 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       gap: 24px;
       position: relative;
       z-index: 10;
+      animation: m3FadeInUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     }
 
     /* Top Bar Header */
@@ -1022,11 +1088,12 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       justify-content: center;
       cursor: pointer;
       flex-shrink: 0;
-      transition: transform 0.2s ease;
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.3s ease;
     }
 
     .m3-avatar-scallop:hover {
-      transform: scale(1.06);
+      transform: rotate(12deg) scale(1.1);
+      filter: drop-shadow(0 0 14px rgba(255, 180, 194, 0.5));
     }
 
     .m3-avatar-scallop-svg {
@@ -1068,23 +1135,38 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      transition: transform 0.15s ease, background 0.15s ease;
+      box-shadow: 0 4px 14px rgba(255, 180, 194, 0.28);
+      transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s ease, box-shadow 0.2s ease;
     }
 
     .m3-chip-panel:hover {
-      transform: translateY(-1px);
+      transform: translateY(-2px) scale(1.02);
       background: #ffa8b8;
+      box-shadow: 0 8px 22px rgba(255, 180, 194, 0.42);
     }
 
-    /* Surface Cards */
+    .m3-chip-panel:active {
+      transform: scale(0.96);
+    }
+
+    /* Surface Cards with Smooth Hover Elevation */
     .m3-surface-card {
       background: var(--md-sys-color-surface-container);
+      border: 1px solid rgba(255, 255, 255, 0.05);
       border-radius: var(--md-sys-shape-corner-xl);
       padding: 24px 28px;
       display: flex;
       flex-direction: column;
       gap: 18px;
       position: relative;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+      transition: transform 0.26s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.26s cubic-bezier(0.2, 0, 0, 1), border-color 0.2s ease;
+    }
+
+    .m3-surface-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 180, 194, 0.15);
+      border-color: rgba(255, 180, 194, 0.2);
     }
 
     .m3-card-header {
@@ -1114,6 +1196,11 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
+      transition: transform 0.2s ease;
+    }
+
+    .m3-surface-card:hover .m3-icon-pill {
+      transform: scale(1.08);
     }
 
     .m3-card-desc {
@@ -1130,8 +1217,10 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       flex-wrap: wrap;
       gap: 16px;
       background: var(--md-sys-color-surface-container-low);
+      border: 1px solid rgba(255, 255, 255, 0.05);
       border-radius: var(--md-sys-shape-corner-lg);
       padding: 16px 24px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
     }
 
     .m3-conn-left {
@@ -1148,7 +1237,7 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       gap: 14px;
     }
 
-    /* Buttons */
+    /* Buttons with Tactile Elevation */
     .m3-btn {
       display: inline-flex;
       align-items: center;
@@ -1159,65 +1248,84 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       font-size: 0.88rem;
       font-weight: 600;
       cursor: pointer;
-      transition: background 0.15s ease, transform 0.1s ease;
+      border: none;
+      transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease, background 0.15s ease;
       text-decoration: none;
       user-select: none;
       white-space: nowrap;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .m3-btn:hover {
+      transform: translateY(-2px) scale(1.02);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
     }
 
     .m3-btn:active {
-      transform: scale(0.98);
+      transform: scale(0.96);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
     }
 
     .m3-btn-primary {
       background: var(--md-sys-color-primary);
       color: var(--md-sys-color-on-primary);
+      box-shadow: 0 4px 14px rgba(255, 180, 194, 0.28);
     }
 
     .m3-btn-primary:hover {
       background: #ffa8b8;
+      box-shadow: 0 8px 24px rgba(255, 180, 194, 0.42);
     }
 
     .m3-btn-tonal {
       background: var(--md-sys-color-surface-container-high);
       color: var(--md-sys-color-on-surface);
+      border: 1px solid rgba(255, 255, 255, 0.05);
     }
 
     .m3-btn-tonal:hover {
       background: var(--md-sys-color-surface-container-highest);
       color: #fff;
+      border-color: rgba(255, 255, 255, 0.1);
     }
 
     .m3-btn-warning {
       background: var(--md-sys-color-warning);
       color: #372800;
+      box-shadow: 0 4px 14px rgba(248, 192, 87, 0.25);
     }
 
     .m3-btn-warning:hover {
       background: #ffd070;
+      box-shadow: 0 8px 22px rgba(248, 192, 87, 0.4);
     }
 
     .m3-btn-success {
       background: var(--md-sys-color-success);
       color: #003915;
+      box-shadow: 0 4px 14px rgba(120, 220, 150, 0.25);
     }
 
     .m3-btn-success:hover {
       background: #8eefa9;
+      box-shadow: 0 8px 22px rgba(120, 220, 150, 0.4);
     }
 
     .m3-btn-outlined {
       background: rgba(255, 180, 194, 0.08);
       color: var(--md-sys-color-on-surface);
+      border: 1px solid var(--md-sys-color-outline-variant);
     }
 
     .m3-btn-outlined:hover {
       background: rgba(255, 180, 194, 0.16);
+      border-color: var(--md-sys-color-primary);
     }
 
     /* Form Controls */
     .m3-input {
       background: #17151a;
+      border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: var(--md-sys-shape-corner-md);
       padding: 10px 16px;
       color: var(--md-sys-color-on-surface);
@@ -1226,13 +1334,16 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       outline: none;
       flex: 1;
       min-width: 140px;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
     }
 
     .m3-input:focus {
       background: #1e1b23;
+      border-color: var(--md-sys-color-primary);
+      box-shadow: 0 0 0 3px rgba(255, 180, 194, 0.2);
     }
 
-    /* Status Pill / Chip */
+    /* Status Pill / Chip with Breathing Glow */
     .m3-status-chip {
       display: inline-flex;
       align-items: center;
@@ -1243,16 +1354,19 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       font-weight: 600;
       background: var(--md-sys-color-surface-container-highest);
       color: var(--md-sys-color-on-surface-variant);
+      transition: transform 0.2s ease;
     }
 
     .m3-status-chip.online {
       background: rgba(120, 220, 150, 0.15);
       color: var(--md-sys-color-success);
+      border: 1px solid rgba(120, 220, 150, 0.25);
     }
 
     .m3-status-chip.offline {
       background: rgba(255, 180, 171, 0.15);
       color: var(--md-sys-color-error);
+      border: 1px solid rgba(255, 180, 171, 0.25);
     }
 
     .m3-status-dot {
@@ -1260,6 +1374,14 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       height: 8px;
       border-radius: 50%;
       background: currentColor;
+    }
+
+    .m3-status-dot.online {
+      animation: statusBreathe 2s infinite ease-in-out;
+    }
+
+    .m3-status-dot.offline {
+      animation: statusBreatheError 2s infinite ease-in-out;
     }
 
     /* Cards Grid */
@@ -1290,11 +1412,20 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
 
     .m3-dep-item {
       background: #17151b;
+      border: 1px solid rgba(255, 255, 255, 0.05);
       border-radius: 16px;
       padding: 16px;
       display: flex;
       flex-direction: column;
       gap: 6px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.22s ease, border-color 0.2s ease;
+    }
+
+    .m3-dep-item:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
+      border-color: rgba(255, 180, 194, 0.15);
     }
 
     .m3-dep-item-header {
@@ -1354,11 +1485,20 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
 
     .m3-telemetry-tile {
       background: #18161c;
+      border: 1px solid rgba(255, 255, 255, 0.05);
       border-radius: 16px;
       padding: 16px 20px;
       display: flex;
       flex-direction: column;
       gap: 6px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+      transition: transform 0.25s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.25s ease, border-color 0.2s ease;
+    }
+
+    .m3-telemetry-tile:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      border-color: rgba(255, 180, 194, 0.15);
     }
 
     .m3-telemetry-tile-header {
@@ -1400,7 +1540,7 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      transition: all 0.15s ease;
+      transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s ease, color 0.15s ease, box-shadow 0.18s ease;
       background: #28252f;
       color: #c7c2c9;
       user-select: none;
@@ -1409,16 +1549,19 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
     .m3-mode-pill:hover {
       background: #34303d;
       color: #fff;
+      transform: translateY(-1px);
     }
 
     .m3-mode-pill.active {
       background: var(--md-sys-color-primary);
       color: var(--md-sys-color-on-primary);
+      box-shadow: 0 4px 14px rgba(255, 180, 194, 0.35);
     }
 
     /* Terminal Console Box */
     .m3-terminal-box {
       background: #0d0c0f;
+      border: 1px solid rgba(255, 255, 255, 0.06);
       border-radius: var(--md-sys-shape-corner-md);
       padding: 18px 20px;
       font-family: var(--md-sys-typescale-mono);
@@ -1430,6 +1573,7 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       display: flex;
       flex-direction: column;
       gap: 4px;
+      box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.5);
     }
 
     .m3-terminal-box::-webkit-scrollbar {
@@ -1441,22 +1585,24 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       border-radius: 3px;
     }
 
-    /* Modal Backdrop & Card */
+    /* Modal Backdrop & Card with Blur and Pop-in */
     .m3-modal-backdrop {
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.75);
-      backdrop-filter: blur(8px);
+      background: rgba(0, 0, 0, 0.78);
+      backdrop-filter: blur(10px);
       display: flex;
       align-items: center;
       justify-content: center;
       z-index: 9999;
       padding: 24px;
       overflow-y: auto;
+      animation: modalBackdropFade 0.25s ease forwards;
     }
 
     .m3-modal-card {
       background: #1b1920;
+      border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: var(--md-sys-shape-corner-xl);
       max-width: 820px;
       width: 100%;
@@ -1466,15 +1612,23 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
       display: flex;
       flex-direction: column;
       gap: 20px;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 180, 194, 0.15);
+      animation: modalPopIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
     }
 
     .m3-guide-section {
       background: #141217;
+      border: 1px solid rgba(255, 255, 255, 0.04);
       border-radius: 16px;
       padding: 20px;
       display: flex;
       flex-direction: column;
       gap: 10px;
+      transition: transform 0.2s ease;
+    }
+
+    .m3-guide-section:hover {
+      transform: translateY(-1px);
     }
 
     .m3-guide-section h4 {

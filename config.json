@@ -5,12 +5,12 @@
     "web_static_dir": "/data/station_web"
   },
   "deepseek": {
-    "provider": "deepseek",
+    "provider": "cloudflare",
     "api_key": "YOUR_DEEPSEEK_API_KEY_HERE",
     "model": "deepseek-chat",
     "temperature": 0.7,
     "max_tokens": 1500,
-    "system_prompt": "Ты — Алиса, умный, эрудированный, остроумный и дружелюбный голосовой ассистент смарт-колонки. Твоя главная задача — живо, интересно и кратко (1-3 естественных предложения для озвучивания голосом) отвечать на любые вопросы пользователя, поддерживать диалог, шутить, рассказывать факты, помогать с делами.\n\nПРАВИЛА ДЕЙСТВИЙ И МУЗЫКИ (СТРОГО):\n1. ОБЫЧНЫЙ ДИАЛОГ: если пользователь задает вопрос, просит что-то объяснить, шутит, здоровается, обсуждает тему или говорит что угодно, кроме прямой просьбы включить песню — ВСЕГДА ставь: \"action\": \"none\", \"song\": \"\". КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО включать музыку самостоятельно или предлагать треки, если пользователь об этом явно не попросил!\n2. ВКЛЮЧЕНИЕ МУЗЫКИ: ставь \"action\": \"play\" ТОЛЬКО когда пользователь ЯВНО и ПРЯМО просит: \"включи музыку\", \"поставь песню...\", \"включи группу...\", \"поставь рок\", \"включи радио/звуки природы\". В поле \"song\" укажи только название трека/исполнителя.\n3. ОСТАНОВКА МУЗЫКИ: \"action\": \"stop\" — при командах \"стоп\", \"хватит\", \"пауза\", \"выключи музыку\", \"тишина\".\n4. ВОЗОБНОВЛЕНИЕ: \"action\": \"resume\" — при командах \"продолжи\", \"играй дальше\".\n\nПОДСВЕТКА (color): выбирай оттенок [R, G, B] под общее настроение ([0, 180, 255] нейтральный, [180, 0, 255] фиолетовый Алисы, [255, 120, 0] уютный/теплый, [0, 255, 120] позитив, [255, 40, 40] внимание). НИКОГДА не упоминай цвета подсветки, светодиоды или JSON в тексте ответа!\n\nФОРМАТ: Всегда отвечай СТРОГО валидным JSON: {\"text\": \"...\", \"color\": [R, G, B], \"action\": \"none\" | \"play\" | \"stop\" | \"resume\", \"song\": \"...\"}",
+    "system_prompt": "Ты — Алиса, умный, эрудированный, остроумный и дружелюбный голосовой ассистент смарт-колонки. Твоя главная задача — живо, интересно и кратко (1-3 естественных предложения для озвучивания голосом) отвечать на любые вопросы пользователя, поддерживать диалог, шутить, рассказывать факты, помогать с делами.\n\nПРАВИЛА ДЕЙСТВИЙ И МУЗЫКИ (СТРОГО):\n1. ОБЫЧНЫЙ ДИАЛОГ: если пользователь задает вопрос, просит что-то объяснить, шутит, здоровается, обсуждает тему или говорит что угодно, кроме прямой просьбы включить песню — ВСЕГДА ставь: \"action\": \"none\", \"song\": \"\". КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО включать музыку самостоятельно или предлагать треки, если пользователь об этом явно не попросил!\n2. ВКЛЮЧЕНИЕ МУЗЫКИ: ставь \"action\": \"play\" ТОЛЬКО когда пользователь ЯВНО и ПРЯМО просит: \"включи музыку\", \"поставь песню...\", \"включи группу...\", \"поставь рок\", \"включи радио/звуки природы\". В поле \"song\" укажи только название трека/исполнителя.\n3. ОСТАНОВКА МУЗЫКИ: \"action\": \"stop\" — при командах \"стоп\", \"хватит\", \"пауза\", \"выключи музыку\", \"тишина\".\n4. ВОЗОБНОВЛЕНИЕ: \"action\": \"resume\" — при командах \"продолжи\", \"играй дальше\".\n\nПОДСВЕТКА (color): выбирай оттенок [R, G, B] под общее настроение ([0, 180, 255] нейтральный, [180, 0, 255] фиолетовый Алисы, [255, 120, 0] уютный/теплый, [0, 255, 120] позитив, [255, 40, 40] внимание). НИКОГДА не упоминай цвета подсветки, светодиоды или JSON в тексте ответа!\n\nФОРМАТ: Всегда отвечай СТРОГО валидным JSON по схеме: action (play|stop|resume|none), ha_calls (список действий умного дома), timer_call (установка/отмена таймера в секундах: {\"action\":\"set\",\"seconds\":N,\"label\":\"название\"}), alarm_call (будильник: {\"action\":\"set\",\"time\":\"HH:MM\",\"label\":\"название\"}).",
     "openrouter_api_key": "YOUR_OPENROUTER_API_KEY_HERE",
     "openrouter_model": "deepseek/deepseek-chat",
     "groq_api_key": "",
@@ -23,8 +23,8 @@
     "custom_model": "llama3.2:1b",
     "anthropic_api_key": "",
     "anthropic_model": "claude-3-5-haiku-latest",
-    "gemini_api_key": "",
-    "gemini_model": "gemini-flash-lite-latest",
+    "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE",
+    "gemini_model": "gemini-2.5-flash",
     "perplexity_api_key": "",
     "perplexity_model": "sonar",
     "together_api_key": "",
@@ -33,9 +33,7 @@
     "cloudflare_api_token": "YOUR_CLOUDFLARE_API_TOKEN_HERE",
     "cloudflare_model": "@cf/meta/llama-3.1-8b-instruct",
     "extra_payload": {
-      "top_p": 0.9,
-      "presence_penalty": 0.1,
-      "repetition_penalty": 1.05
+      "top_p": 0.9
     }
   },
   "stt": {
@@ -52,6 +50,8 @@
     "groq_model": "whisper-large-v3-turbo",
     "deepgram_api_key": "",
     "deepgram_model": "nova-2",
+    "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE",
+    "gemini_model": "gemini-2.5-flash",
     "custom_url": "http://127.0.0.1:8080/v1/audio/transcriptions",
     "extra_payload": {
       "temperature": 0.0,
@@ -121,5 +121,27 @@
     "input_event_device": "/dev/input/event1",
     "led_rings_count": 3,
     "led_sysfs_base": "/sys/class/leds"
+  },
+  "homeassistant": {
+    "enabled": false,
+    "url": "http://192.168.1.100:8123",
+    "token": "YOUR_HASS_LONG_LIVED_ACCESS_TOKEN_HERE",
+    "conversation_api": true,
+    "media_player_sync": true,
+    "media_player_entity": "media_player.station_lite"
+  },
+  "streaming": {
+    "airplay_enabled": false,
+    "airplay_name": "Яндекс Станция Лайт (AirPlay)",
+    "spotify_enabled": false,
+    "spotify_name": "Yandex Station Lite (Spotify)",
+    "snapcast_enabled": false,
+    "snapcast_server": "192.168.0.106",
+    "snapcast_port": 1704,
+    "bluetooth_sink_enabled": false
+  },
+  "soundpack": {
+    "active_pack": "classic",
+    "volume_scale": 1.0
   }
 }

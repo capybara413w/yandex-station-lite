@@ -1,16 +1,19 @@
 use crate::config::{
-    AppConfig, AssistantConfigResponse, AssistantStageInfo, UpdateAssistantConfigPayload,
+    AppConfig, AssistantConfigResponse, AssistantStageInfo, StreamingConfig, UpdateAssistantConfigPayload,
 };
 use crate::hardware::{AudioHardware, LedController, NetworkHardware, StationButtonEvent};
 use crate::services::{
-    ChatService, ChatSession, ChatSessionSummary, DeepSeekService, PlaybackState, PlayerService,
-    SoundCloudService, SttService, TtsService, VisualizerService, WakeWordService, YtMusicService,
+    list_available_packs, play_sound, synthesize_sound, ChatService, ChatSession,
+    ChatSessionSummary, DeepSeekService, HomeAssistantService, PlaybackState, PlayerService,
+    SoundCloudService, StreamingService, StreamingStatus, SttService, TimerAlarmService, TtsService,
+    VisualizerService, WakeWordService, WeatherService, YtMusicService,
 };
+use crate::services::homeassistant::{HassCallServiceRequest, HassProcessRequest};
 use axum::{
     extract::{Path as AxumPath, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse},
-    routing::{get, post},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -97,6 +100,10 @@ pub struct AppState {
     pub start_time: Instant,
     pub chat: Arc<ChatService>,
     pub wakeword: Arc<WakeWordService>,
+    pub homeassistant: Arc<HomeAssistantService>,
+    pub weather: Arc<WeatherService>,
+    pub timer_alarm: Arc<TimerAlarmService>,
+    pub streaming: Arc<StreamingService>,
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -223,6 +230,35 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/dualboot/choose", post(post_dualboot_choose_handler))
         .route("/api/dualboot/switch_quasar", post(post_switch_quasar_handler))
         .route("/api/dualboot/mode", post(post_dualboot_mode_handler))
+        // Home Assistant Integration
+        .route("/api/hass/status", get(get_hass_status_handler))
+        .route("/api/hass/entities", get(get_hass_entities_handler))
+        .route("/api/hass/call", post(post_hass_call_handler))
+        .route("/api/hass/process", post(post_hass_process_handler))
+        // Weather Service (Open-Meteo)
+        .route("/api/weather", get(get_weather_handler))
+        .route("/api/weather/config", post(post_weather_config_handler))
+        // Timers & Alarms Management
+        .route("/api/timers", get(get_timers_handler).post(post_timer_handler))
+        .route("/api/timers/cancel_all", post(cancel_all_timers_handler))
+        .route("/api/timers/:id", delete(delete_timer_handler))
+        .route("/api/alarms", get(get_alarms_handler).post(post_alarm_handler))
+        .route("/api/alarms/:id", delete(delete_alarm_handler).put(put_alarm_handler))
+        .route("/api/alarm/stop", post(post_alarm_stop_handler))
+        // Streaming Sinks (AirPlay, Spotify Connect, Snapcast)
+        .route("/api/streaming/status", get(get_streaming_status_handler))
+        .route("/api/streaming/config", post(post_streaming_config_handler))
+        .route("/api/streaming/restart", post(restart_streaming_handler))
+        // Bluetooth A2DP Sink
+        .route("/api/bluetooth/sink/enable", post(enable_bt_sink_handler))
+        .route("/api/bluetooth/sink/disable", post(disable_bt_sink_handler))
+        // Sound Packs & Chimes
+        .route("/api/sounds/packs", get(get_sound_packs_handler))
+        .route("/api/sounds/pack", post(set_active_sound_pack_handler))
+        .route("/api/sounds/preview", get(preview_sound_handler).post(preview_sound_handler))
+        // Home Assistant Media Player direct API
+        .route("/api/media_player/play_media", post(media_player_play_handler))
+        .route("/api/media_player/sync", post(sync_ha_media_player_handler))
         // Static assets fallback if /data/station_web exists
         .nest_service("/static", ServeDir::new(static_dir))
         .nest_service("/assets", ServeDir::new("/data/station_web/assets"))
@@ -1561,17 +1597,56 @@ async fn handle_prompt(
         .prepare_session_for_prompt(session_id_req.as_deref())
         .await;
 
-    match state.deepseek.query_with_history(prompt, &history).await {
+    // Context composition (Home Assistant + Weather + Timers/Alarms)
+    let mut context_parts = Vec::new();
+    let ha_context = state.homeassistant.get_entities_summary().await;
+    if !ha_context.is_empty() {
+        context_parts.push(ha_context);
+    }
+    let weather_context = state.weather.get_summary().await;
+    if !weather_context.is_empty() {
+        context_parts.push(weather_context);
+    }
+    let timer_context = state.timer_alarm.get_summary().await;
+    if !timer_context.is_empty() {
+        context_parts.push(timer_context);
+    }
+    let effective_context = context_parts.join("\n\n");
+
+    match state.deepseek.query_with_context(prompt, &history, &effective_context).await {
         Ok(resp) => {
             state.led.set_rgb(resp.color[0], resp.color[1], resp.color[2]);
+
+            // Execute any Home Assistant API calls returned by LLM
+            for ha_call in &resp.ha_calls {
+                info!("Web LLM calling Home Assistant: {}/{} data={:?}", ha_call.domain, ha_call.service, ha_call.service_data);
+                if let Err(e) = state.homeassistant.call_service(&ha_call.domain, &ha_call.service, ha_call.service_data.clone()).await {
+                    error!("Failed to execute HA call {}/{}: {}", ha_call.domain, ha_call.service, e);
+                }
+            }
+
+            // Execute Timer calls returned strictly by LLM
+            if let Some(t_call) = &resp.timer_call {
+                state.timer_alarm.process_timer_call(t_call).await;
+            }
+
+            // Execute Alarm calls returned strictly by LLM
+            if let Some(a_call) = &resp.alarm_call {
+                state.timer_alarm.process_alarm_call(a_call).await;
+            }
+
+            // Stop alarm/timer chime if requested or if ringing
+            if resp.action == "stop" || state.timer_alarm.is_ringing() {
+                state.timer_alarm.stop_ringing();
+            }
 
             state
                 .logs
                 .push(
                     "INFO",
                     &format!(
-                        "DeepSeek ответ [чат {}]: '{}' (действие: {})",
-                        session_id, resp.text, resp.action
+                        "DeepSeek ответ [чат {}]: '{}' (действие: {}, ha_calls: {})",
+                        session_id, resp.text, resp.action, resp.ha_calls.len()
                     ),
                 )
                 .await;
@@ -1586,6 +1661,7 @@ async fn handle_prompt(
                     &resp.action,
                     resp.color,
                     &resp.song,
+                    resp.ha_calls.clone(),
                 )
                 .await;
 
@@ -3456,5 +3532,482 @@ async fn delete_all_chats_handler(State(state): State<AppState>) -> impl IntoRes
         "message": "Все чаты успешно удалены"
     }))
 }
+
+// ==========================================
+// Home Assistant Handlers
+// ==========================================
+
+async fn get_hass_status_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match state.homeassistant.check_status().await {
+        Ok(res) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "ok", "data": res })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "status": "error", "error": e })),
+        ),
+    }
+}
+
+async fn get_hass_entities_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match state.homeassistant.get_entities().await {
+        Ok(entities) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "ok", "entities": entities })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "status": "error", "error": e })),
+        ),
+    }
+}
+
+async fn post_hass_call_handler(
+    State(state): State<AppState>,
+    Json(req): Json<HassCallServiceRequest>,
+) -> impl IntoResponse {
+    match state
+        .homeassistant
+        .call_service(&req.domain, &req.service, req.service_data)
+        .await
+    {
+        Ok(res) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "ok", "result": res })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "status": "error", "error": e })),
+        ),
+    }
+}
+
+async fn post_hass_process_handler(
+    State(state): State<AppState>,
+    Json(req): Json<HassProcessRequest>,
+) -> impl IntoResponse {
+    match state.homeassistant.process_conversation(&req.text).await {
+        Ok(speech) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "ok", "speech": speech })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "status": "error", "error": e })),
+        ),
+    }
+}
+
+// ============================================================================
+// Weather & Timers/Alarms REST Handlers
+// ============================================================================
+
+#[derive(Deserialize)]
+struct WeatherQuery {
+    #[serde(default)]
+    city: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateWeatherConfigRequest {
+    city: Option<String>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
+    timezone: Option<String>,
+}
+
+async fn get_weather_handler(
+    State(state): State<AppState>,
+    Query(query): Query<WeatherQuery>,
+) -> impl IntoResponse {
+    let res = if let Some(city) = query.city.as_deref().filter(|s| !s.trim().is_empty()) {
+        state.weather.get_weather_for_city(city).await
+    } else {
+        state.weather.get_current_weather().await
+    };
+
+    match res {
+        Ok(report) => (StatusCode::OK, Json(serde_json::to_value(report).unwrap())),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e })),
+        ),
+    }
+}
+
+async fn post_weather_config_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<UpdateWeatherConfigRequest>,
+) -> impl IntoResponse {
+    let mut cfg = state.config.write().await;
+    if let Some(c) = payload.city {
+        cfg.weather.city = c;
+    }
+    if let Some(lat) = payload.latitude {
+        cfg.weather.latitude = lat;
+    }
+    if let Some(lon) = payload.longitude {
+        cfg.weather.longitude = lon;
+    }
+    if let Some(tz) = payload.timezone {
+        cfg.weather.timezone = tz;
+    }
+    let saved = cfg.clone();
+    drop(cfg);
+
+    if let Ok(json) = serde_json::to_string_pretty(&saved) {
+        let _ = std::fs::write("/data/config.json", json);
+    }
+
+    (StatusCode::OK, Json(serde_json::json!({ "status": "ok", "weather": saved.weather })))
+}
+
+// ----------------- Timers -----------------
+
+#[derive(Deserialize)]
+struct CreateTimerRequest {
+    #[serde(alias = "duration_secs")]
+    duration: u64,
+    #[serde(default)]
+    label: Option<String>,
+}
+
+async fn get_timers_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let timers = state.timer_alarm.list_timers().await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let items: Vec<serde_json::Value> = timers
+        .into_iter()
+        .map(|t| {
+            let rem = t.remaining_secs(now);
+            serde_json::json!({
+                "id": t.id,
+                "label": t.label,
+                "duration_secs": t.duration_secs,
+                "remaining_secs": rem,
+                "created_at": t.created_at,
+                "ends_at": t.ends_at,
+                "is_ringing": t.is_ringing,
+            })
+        })
+        .collect();
+
+    Json(serde_json::json!({ "timers": items }))
+}
+
+async fn post_timer_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateTimerRequest>,
+) -> impl IntoResponse {
+    let timer = state.timer_alarm.add_timer(payload.duration, payload.label.as_deref()).await;
+    (StatusCode::CREATED, Json(serde_json::to_value(timer).unwrap()))
+}
+
+async fn cancel_all_timers_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let count = state.timer_alarm.cancel_all_timers().await;
+    Json(serde_json::json!({ "status": "ok", "cancelled": count }))
+}
+
+async fn delete_timer_handler(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> impl IntoResponse {
+    let success = state.timer_alarm.cancel_timer(&id).await;
+    Json(serde_json::json!({ "status": if success { "ok" } else { "not_found" } }))
+}
+
+// ----------------- Alarms -----------------
+
+#[derive(Deserialize)]
+struct CreateAlarmRequest {
+    time: String,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    repeat: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateAlarmRequest {
+    enabled: bool,
+}
+
+async fn get_alarms_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let alarms = state.timer_alarm.list_alarms().await;
+    Json(serde_json::json!({ "alarms": alarms }))
+}
+
+async fn post_alarm_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateAlarmRequest>,
+) -> impl IntoResponse {
+    match state.timer_alarm.add_alarm(&payload.time, payload.label.as_deref(), payload.repeat.as_deref()).await {
+        Ok(alarm) => (StatusCode::CREATED, Json(serde_json::to_value(alarm).unwrap())),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e }))),
+    }
+}
+
+async fn put_alarm_handler(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    Json(payload): Json<UpdateAlarmRequest>,
+) -> impl IntoResponse {
+    let success = state.timer_alarm.toggle_alarm(&id, payload.enabled).await;
+    Json(serde_json::json!({ "status": if success { "ok" } else { "not_found" } }))
+}
+
+async fn delete_alarm_handler(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> impl IntoResponse {
+    let success = state.timer_alarm.delete_alarm(&id).await;
+    Json(serde_json::json!({ "status": if success { "ok" } else { "not_found" } }))
+}
+
+async fn post_alarm_stop_handler(State(state): State<AppState>) -> impl IntoResponse {
+    state.timer_alarm.stop_ringing();
+    Json(serde_json::json!({ "status": "ok" }))
+}
+
+// ==============================================================================
+// STREAMING SINKS (AirPlay, Spotify Connect, Snapcast)
+// ==============================================================================
+
+async fn save_app_config(cfg: &AppConfig) {
+    let save_path = if Path::new("/data").exists() {
+        "/data/config.json"
+    } else {
+        "config.json"
+    };
+    if let Ok(json_str) = serde_json::to_string_pretty(cfg) {
+        let _ = tokio::fs::write(save_path, json_str).await;
+    }
+}
+
+async fn get_streaming_status_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let status = state.streaming.get_status().await;
+    Json(status)
+}
+
+#[derive(Deserialize)]
+struct UpdateStreamingConfigRequest {
+    #[serde(default)]
+    pub airplay_enabled: Option<bool>,
+    #[serde(default)]
+    pub airplay_name: Option<String>,
+    #[serde(default)]
+    pub spotify_enabled: Option<bool>,
+    #[serde(default)]
+    pub spotify_name: Option<String>,
+    #[serde(default)]
+    pub snapcast_enabled: Option<bool>,
+    #[serde(default)]
+    pub snapcast_server: Option<String>,
+    #[serde(default)]
+    pub snapcast_port: Option<u16>,
+    #[serde(default)]
+    pub bluetooth_sink_enabled: Option<bool>,
+}
+
+async fn post_streaming_config_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<UpdateStreamingConfigRequest>,
+) -> impl IntoResponse {
+    {
+        let mut cfg = state.config.write().await;
+        let s = &mut cfg.streaming;
+        if let Some(v) = payload.airplay_enabled { s.airplay_enabled = v; }
+        if let Some(v) = payload.airplay_name { s.airplay_name = v; }
+        if let Some(v) = payload.spotify_enabled { s.spotify_enabled = v; }
+        if let Some(v) = payload.spotify_name { s.spotify_name = v; }
+        if let Some(v) = payload.snapcast_enabled { s.snapcast_enabled = v; }
+        if let Some(v) = payload.snapcast_server { s.snapcast_server = v; }
+        if let Some(v) = payload.snapcast_port { s.snapcast_port = v; }
+        if let Some(v) = payload.bluetooth_sink_enabled { s.bluetooth_sink_enabled = v; }
+        save_app_config(&*cfg).await;
+    }
+    state.streaming.sync_services().await;
+
+    let status = state.streaming.get_status().await;
+    Json(serde_json::json!({
+        "success": true,
+        "status": status,
+    }))
+}
+
+async fn restart_streaming_handler(State(state): State<AppState>) -> impl IntoResponse {
+    state.streaming.sync_services().await;
+    let status = state.streaming.get_status().await;
+    Json(serde_json::json!({
+        "success": true,
+        "status": status,
+    }))
+}
+
+// ==============================================================================
+// BLUETOOTH A2DP SINK
+// ==============================================================================
+
+async fn enable_bt_sink_handler(State(state): State<AppState>) -> impl IntoResponse {
+    {
+        let mut cfg = state.config.write().await;
+        cfg.streaming.bluetooth_sink_enabled = true;
+        save_app_config(&*cfg).await;
+    }
+    state.streaming.sync_services().await;
+    Json(serde_json::json!({
+        "success": true,
+        "discoverable": true,
+        "message": "Bluetooth включен в режим обнаружения (A2DP Sink). Выберите 'Yandex Station' на телефоне.",
+    }))
+}
+
+async fn disable_bt_sink_handler(State(state): State<AppState>) -> impl IntoResponse {
+    {
+        let mut cfg = state.config.write().await;
+        cfg.streaming.bluetooth_sink_enabled = false;
+        save_app_config(&*cfg).await;
+    }
+    state.streaming.sync_services().await;
+    Json(serde_json::json!({
+        "success": true,
+        "discoverable": false,
+    }))
+}
+
+// ==============================================================================
+// SOUND PACKS
+// ==============================================================================
+
+async fn get_sound_packs_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let active_pack = {
+        let cfg = state.config.read().await;
+        cfg.soundpack.active_pack.clone()
+    };
+    let packs = list_available_packs();
+    let packs_json: Vec<_> = packs.into_iter().map(|p| {
+        serde_json::json!({
+            "id": p.id,
+            "name": p.name,
+            "description": p.description,
+            "active": p.id == active_pack,
+        })
+    }).collect();
+
+    Json(serde_json::json!({
+        "active_pack": active_pack,
+        "packs": packs_json,
+    }))
+}
+
+#[derive(Deserialize)]
+struct SetSoundPackRequest {
+    pack: String,
+}
+
+async fn set_active_sound_pack_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<SetSoundPackRequest>,
+) -> impl IntoResponse {
+    {
+        let mut cfg = state.config.write().await;
+        cfg.soundpack.active_pack = payload.pack.clone();
+        save_app_config(&*cfg).await;
+    }
+
+    let card = {
+        let cfg = state.config.read().await;
+        cfg.audio.alsa_card.clone()
+    };
+    let pack = payload.pack.clone();
+    tokio::task::spawn_blocking(move || {
+        play_sound(&pack, "activation", &card);
+    });
+
+    Json(serde_json::json!({
+        "success": true,
+        "active_pack": payload.pack,
+    }))
+}
+
+#[derive(Deserialize)]
+struct PreviewSoundQuery {
+    #[serde(default = "default_preview_pack")]
+    pack: String,
+    #[serde(default = "default_preview_type")]
+    sound: String,
+}
+fn default_preview_pack() -> String { "classic".to_string() }
+fn default_preview_type() -> String { "activation".to_string() }
+
+async fn preview_sound_handler(
+    Query(query): Query<PreviewSoundQuery>,
+) -> impl IntoResponse {
+    let wav_bytes = synthesize_sound(&query.pack, &query.sound);
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "audio/wav"),
+            (axum::http::header::CACHE_CONTROL, "no-cache"),
+        ],
+        wav_bytes,
+    )
+}
+
+// ==============================================================================
+// HOME ASSISTANT MEDIA PLAYER API
+// ==============================================================================
+
+#[derive(Deserialize)]
+struct HaPlayMediaRequest {
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    artist: Option<String>,
+    #[serde(default)]
+    query: Option<String>,
+}
+
+async fn media_player_play_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<HaPlayMediaRequest>,
+) -> impl IntoResponse {
+    if let Some(url) = payload.url {
+        let title = payload.title.as_deref().unwrap_or("Стрим");
+        let artist = payload.artist.as_deref().unwrap_or("Home Assistant");
+        state.player.play_direct_stream(&url, title, artist, None, 0, false, 0, &state.led).await;
+    } else if let Some(query) = payload.query {
+        state.player.play_smart_or_query(&state.ytmusic, &state.soundcloud, &query, &state.led).await;
+    }
+
+    let ha = state.homeassistant.clone();
+    let player = state.player.clone();
+    let vol = state.audio.get_volume() as f32 / 10.0;
+    tokio::spawn(async move {
+        let (st, track, artist, art, dur, pos) = player.get_snapshot().await;
+        let _ = ha.sync_media_player_state(&st, vol, &track, &artist, art.as_deref(), dur, pos).await;
+    });
+
+    Json(serde_json::json!({ "success": true, "state": "playing" }))
+}
+
+async fn sync_ha_media_player_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let ha = state.homeassistant.clone();
+    let player = state.player.clone();
+    let vol = state.audio.get_volume() as f32 / 10.0;
+    let (st, track, artist, art, dur, pos) = player.get_snapshot().await;
+    let res = ha.sync_media_player_state(&st, vol, &track, &artist, art.as_deref(), dur, pos).await;
+
+    match res {
+        Ok(_) => (StatusCode::OK, Json(serde_json::json!({ "success": true, "synced": true }))),
+        Err(e) => (StatusCode::BAD_GATEWAY, Json(serde_json::json!({ "success": false, "error": e }))),
+    }
+}
+
 
 

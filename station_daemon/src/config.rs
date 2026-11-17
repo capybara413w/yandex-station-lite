@@ -125,7 +125,7 @@ fn default_anthropic_model() -> String {
     "claude-3-5-haiku-latest".to_string()
 }
 fn default_gemini_model() -> String {
-    "gemini-3.5-flash".to_string()
+    "gemini-3.8-flash".to_string()
 }
 fn default_perplexity_model() -> String {
     "sonar".to_string()
@@ -246,7 +246,7 @@ fn default_deepgram_stt_model() -> String {
     "nova-2".to_string()
 }
 fn default_gemini_stt_model() -> String {
-    "gemini-flash-lite-latest".to_string()
+    "gemini-3.8-flash".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -565,6 +565,150 @@ pub struct AccountsConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HomeAssistantConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_ha_url")]
+    pub url: String,
+    #[serde(default)]
+    pub token: String,
+    #[serde(default = "default_true")]
+    pub conversation_api: bool,
+    #[serde(default = "default_true")]
+    pub media_player_sync: bool,
+    #[serde(default = "default_ha_media_player_entity")]
+    pub media_player_entity: String,
+}
+
+fn default_ha_url() -> String {
+    "http://192.168.0.106:8123".to_string()
+}
+fn default_ha_media_player_entity() -> String {
+    "media_player.station_lite".to_string()
+}
+
+impl Default for HomeAssistantConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: default_ha_url(),
+            token: String::new(),
+            conversation_api: true,
+            media_player_sync: true,
+            media_player_entity: default_ha_media_player_entity(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamingConfig {
+    #[serde(default)]
+    pub airplay_enabled: bool,
+    #[serde(default = "default_airplay_name")]
+    pub airplay_name: String,
+    #[serde(default)]
+    pub spotify_enabled: bool,
+    #[serde(default = "default_spotify_name")]
+    pub spotify_name: String,
+    #[serde(default)]
+    pub snapcast_enabled: bool,
+    #[serde(default = "default_snapcast_server")]
+    pub snapcast_server: String,
+    #[serde(default = "default_snapcast_port")]
+    pub snapcast_port: u16,
+    #[serde(default)]
+    pub bluetooth_sink_enabled: bool,
+}
+
+fn default_airplay_name() -> String {
+    "Яндекс Станция Лайт (AirPlay)".to_string()
+}
+fn default_spotify_name() -> String {
+    "Yandex Station Lite (Spotify)".to_string()
+}
+fn default_snapcast_server() -> String {
+    "192.168.0.106".to_string()
+}
+fn default_snapcast_port() -> u16 {
+    1704
+}
+
+impl Default for StreamingConfig {
+    fn default() -> Self {
+        Self {
+            airplay_enabled: false,
+            airplay_name: default_airplay_name(),
+            spotify_enabled: false,
+            spotify_name: default_spotify_name(),
+            snapcast_enabled: false,
+            snapcast_server: default_snapcast_server(),
+            snapcast_port: default_snapcast_port(),
+            bluetooth_sink_enabled: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoundPackConfig {
+    #[serde(default = "default_sound_pack")]
+    pub active_pack: String,
+    #[serde(default = "default_sound_volume_scale")]
+    pub volume_scale: f32,
+}
+
+fn default_sound_pack() -> String {
+    "classic".to_string()
+}
+fn default_sound_volume_scale() -> f32 {
+    1.0
+}
+
+impl Default for SoundPackConfig {
+    fn default() -> Self {
+        Self {
+            active_pack: default_sound_pack(),
+            volume_scale: default_sound_volume_scale(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeatherConfig {
+    #[serde(default = "default_weather_city")]
+    pub city: String,
+    #[serde(default = "default_weather_lat")]
+    pub latitude: f64,
+    #[serde(default = "default_weather_lon")]
+    pub longitude: f64,
+    #[serde(default = "default_weather_timezone")]
+    pub timezone: String,
+}
+
+fn default_weather_city() -> String {
+    "Москва".to_string()
+}
+fn default_weather_lat() -> f64 {
+    55.7522
+}
+fn default_weather_lon() -> f64 {
+    37.6156
+}
+fn default_weather_timezone() -> String {
+    "Europe/Moscow".to_string()
+}
+
+impl Default for WeatherConfig {
+    fn default() -> Self {
+        Self {
+            city: default_weather_city(),
+            latitude: default_weather_lat(),
+            longitude: default_weather_lon(),
+            timezone: default_weather_timezone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub server: ServerConfig,
     pub deepseek: DeepSeekConfig,
@@ -576,6 +720,14 @@ pub struct AppConfig {
     pub hardware: HardwareConfig,
     #[serde(default)]
     pub accounts: AccountsConfig,
+    #[serde(default)]
+    pub homeassistant: HomeAssistantConfig,
+    #[serde(default)]
+    pub weather: WeatherConfig,
+    #[serde(default)]
+    pub streaming: StreamingConfig,
+    #[serde(default)]
+    pub soundpack: SoundPackConfig,
 }
 
 impl Default for AppConfig {
@@ -609,6 +761,10 @@ impl Default for AppConfig {
                 led_sysfs_base: default_sysfs_base(),
             },
             accounts: AccountsConfig::default(),
+            homeassistant: HomeAssistantConfig::default(),
+            weather: WeatherConfig::default(),
+            streaming: StreamingConfig::default(),
+            soundpack: SoundPackConfig::default(),
         }
     }
 }
