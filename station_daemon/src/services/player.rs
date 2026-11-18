@@ -140,6 +140,14 @@ impl PlayerService {
                 // Pause 250ms for ALSA sound hardware to completely release hw:0,0
                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
 
+                // Do not auto-start if an alarm is ringing or assistant is listening/speaking
+                if std::path::Path::new("/tmp/alarm_ringing").exists()
+                    || std::path::Path::new("/tmp/listen.lock").exists()
+                {
+                    info!("Autoplay deferred: alarm or voice assistant is active");
+                    continue;
+                }
+
                 if player.get_state().await != PlaybackState::Stopped {
                     continue;
                 }
@@ -204,6 +212,9 @@ impl PlayerService {
                             if r.id != vid && !q.iter().any(|x| x.id == r.id) {
                                 q.push(r);
                             }
+                        }
+                        if q.len() > 50 {
+                            q.truncate(50);
                         }
                     }
                 });
@@ -287,16 +298,18 @@ impl PlayerService {
         info!("Stopping current audio decoders (SIGTERM -> SIGKILL)...");
 
         // 1. Send SIGTERM first so decoders can close audio devices cleanly
-        let _ = Command::new("killall")
+        let _ = tokio::process::Command::new("killall")
             .args(["-TERM", "aplay", "mpg123", "ffmpeg"])
-            .output();
+            .output()
+            .await;
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         // 2. Send SIGKILL to ensure no zombie or hung processes remain
-        let _ = Command::new("killall")
+        let _ = tokio::process::Command::new("killall")
             .args(["-9", "aplay", "mpg123", "ffmpeg", "play.sh"])
-            .output();
+            .output()
+            .await;
 
         let _ = fs::remove_file("/tmp/music_paused");
         let _ = fs::remove_file("/tmp/music_playing");
@@ -797,11 +810,16 @@ impl PlayerService {
                     if *st == PlaybackState::Playing {
                         *st = PlaybackState::Stopped;
                     }
+                    let natural_end = exit_status.as_ref().map(|s| s.success()).unwrap_or(false);
                     info!(
-                        "⏹ Track playback finished after {}s with exit status: {:?} (gen: {})",
-                        total_secs, exit_status, current_gen
+                        "⏹ Track playback finished after {}s with exit status: {:?} (natural: {}, gen: {})",
+                        total_secs, exit_status, natural_end, current_gen
                     );
-                    if autoplay_flag.load(Ordering::Relaxed) {
+                    if natural_end
+                        && autoplay_flag.load(Ordering::Relaxed)
+                        && !std::path::Path::new("/tmp/alarm_ringing").exists()
+                        && !std::path::Path::new("/tmp/listen.lock").exists()
+                    {
                         let _ = autoplay_tx.send(()).await;
                     }
                 } else {

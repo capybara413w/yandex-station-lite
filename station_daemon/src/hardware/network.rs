@@ -517,6 +517,10 @@ impl NetworkHardware {
         if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             return Err("Invalid parameter name".to_string());
         }
+        let val_trimmed = value.trim();
+        if val_trimmed.len() > 16 || !val_trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err("Invalid parameter value".to_string());
+        }
 
         let p = Path::new("/sys/module/88x2cs/parameters").join(name);
         if !p.exists() {

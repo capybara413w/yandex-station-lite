@@ -3325,10 +3325,10 @@
                 <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;">
                   ${artworkImg}
                   <div style="min-width: 0; flex: 1;">
-                    <div style="font-weight: 700; font-size: 0.88rem; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${t.title}</div>
+                    <div style="font-weight: 700; font-size: 0.88rem; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(t.title)}</div>
                     <div style="display: flex; align-items: center; gap: 6px; margin-top: 2px;">
                       <span style="font-size: 0.65rem; font-weight: 800; background: ${badgeBg}; color: ${badgeColor}; padding: 1px 6px; border-radius: 6px; text-transform: uppercase;">${badgeLabel}</span>
-                      <span style="font-size: 0.74rem; color: #9d96a2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${t.artist || 'Неизвестен'}</span>
+                      <span style="font-size: 0.74rem; color: #9d96a2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(t.artist || 'Неизвестен')}</span>
                     </div>
                   </div>
                 </div>
@@ -3850,7 +3850,7 @@
                 <span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 20px;">wifi</span>
                 <div>
                   <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-weight: 700; font-size: 0.88rem; color: #fff;">${n.ssid}</span>
+                    <span style="font-weight: 700; font-size: 0.88rem; color: #fff;">${escapeHtml(n.ssid)}</span>
                     <span class="material-symbols-rounded" style="font-size: 15px; color: ${isSecured ? '#a49ea8' : '#78dc96'};">${encIcon}</span>
                     ${bandBadge}
                   </div>
@@ -3859,7 +3859,7 @@
                   </div>
                 </div>
               </div>
-              <button type="button" class="m3-btn m3-btn-outlined" style="font-size: 0.75rem; padding: 4px 12px;" onclick="selectWifiNetwork('${n.ssid.replace(/'/g, "\\'")}')">
+              <button type="button" class="m3-btn m3-btn-outlined" style="font-size: 0.75rem; padding: 4px 12px;" onclick="selectWifiNetwork('${encodeURIComponent(n.ssid)}')">
                 <span>Подключить</span>
               </button>
             </div>
@@ -3870,8 +3870,12 @@
       }
     }
 
-    function selectWifiNetwork(ssid) {
-      document.getElementById('wifiConnectSsid').value = ssid;
+    function selectWifiNetwork(encodedSsid) {
+      try {
+        document.getElementById('wifiConnectSsid').value = decodeURIComponent(encodedSsid);
+      } catch (e) {
+        document.getElementById('wifiConnectSsid').value = encodedSsid;
+      }
       document.getElementById('wifiConnectPsk').focus();
     }
 
@@ -4182,7 +4186,7 @@
           <div style="display: flex; align-items: center; gap: 10px;">
             <span class="material-symbols-rounded" style="color: #ffb4c2; font-size: 20px;">headset</span>
             <div>
-              <div style="font-weight: 700; font-size: 0.88rem; color: #fff;">${dev.name || 'Безымянное устройство'}</div>
+              <div style="font-weight: 700; font-size: 0.88rem; color: #fff;">${escapeHtml(dev.name || 'Безымянное устройство')}</div>
               <div style="font-size: 0.72rem; color: #8e8893; font-family: monospace;">${dev.address}</div>
             </div>
           </div>

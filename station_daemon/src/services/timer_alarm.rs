@@ -275,6 +275,7 @@ impl TimerAlarmService {
 
         info!("Stopping alarm / timer ringing chime!");
         self.is_ringing.store(false, Ordering::SeqCst);
+        let _ = fs::remove_file("/tmp/alarm_ringing");
 
         let pid = self.ringing_pid.swap(0, Ordering::SeqCst);
         if pid > 0 {
@@ -297,6 +298,7 @@ impl TimerAlarmService {
         }
 
         self.is_ringing.store(true, Ordering::SeqCst);
+        let _ = fs::write("/tmp/alarm_ringing", "1");
         info!("RINGING ACTIVATED: '{}' (alarm={})", title, is_alarm);
 
         let this = self.clone();

@@ -1369,7 +1369,10 @@ export default function App() {
     try {
       const res = await fetch('/api/terminal/exec', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Station-Request': '1',
+        },
         body: JSON.stringify({ command: cmd }),
       });
       const data = await res.json();

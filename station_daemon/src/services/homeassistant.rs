@@ -182,7 +182,12 @@ impl HomeAssistantService {
 
         let mut lines = Vec::new();
         lines.push("\n[АКТУАЛЬНЫЕ УСТРОЙСТВА И ДАТЧИКИ УМНОГО ДОМА (Home Assistant)]:".to_string());
+        let mut count = 0;
         for e in entities {
+            if count >= 60 {
+                lines.push("- ... [список сокращен до 60 устройств для экономии памяти]".to_string());
+                break;
+            }
             let domain = e.entity_id.split('.').next().unwrap_or("");
             if !matches!(domain, "light" | "switch" | "sensor" | "binary_sensor" | "input_boolean" | "sun" | "todo" | "climate") {
                 continue;
@@ -190,6 +195,7 @@ impl HomeAssistantService {
             if e.entity_id.contains("backup") {
                 continue;
             }
+            count += 1;
             let friendly_name = e.attributes.get("friendly_name")
                 .and_then(|v| v.as_str())
                 .unwrap_or(&e.entity_id);

@@ -226,6 +226,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/bluetooth/remove", post(remove_bluetooth_handler))
         // Terminal command execution
         .route("/api/terminal/run", post(terminal_run_handler))
+        .route("/api/terminal/exec", post(terminal_run_handler))
         .route("/api/command", post(terminal_run_handler))
         // Dual Boot & System Switch
         .route("/api/dualboot/status", get(get_dualboot_status_handler))
@@ -266,7 +267,22 @@ pub fn create_router(state: AppState) -> Router {
         .nest_service("/assets", ServeDir::new("/data/station_web/assets"))
         .nest_service("/fonts", ServeDir::new("/data/station_web/fonts"))
         .layer(DefaultBodyLimit::max(64 * 1024))
-        .layer(CorsLayer::permissive())
+        .layer(
+            CorsLayer::new()
+                .allow_origin(tower_http::cors::Any)
+                .allow_methods([
+                    axum::http::Method::GET,
+                    axum::http::Method::POST,
+                    axum::http::Method::DELETE,
+                    axum::http::Method::PUT,
+                    axum::http::Method::OPTIONS,
+                ])
+                .allow_headers([
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::header::AUTHORIZATION,
+                    axum::http::header::HeaderName::from_static("x-station-request"),
+                ]),
+        )
         .with_state(state)
 }
 
@@ -1489,9 +1505,13 @@ async fn post_speak_handler(
 
     let tts = state.tts.clone();
     let led = state.led.clone();
+    let player = state.player.clone();
     let text_clone = text.to_string();
 
     tokio::spawn(async move {
+        if player.get_state().await == PlaybackState::Playing {
+            player.pause(&led).await;
+        }
         if let Err(e) = tts.speak(&text_clone, color, &led).await {
             error!("TTS Speak failed: {}", e);
         }
@@ -1633,20 +1653,6 @@ async fn handle_prompt(
                 }
 
                 match resp.action.as_str() {
-                    "play" => {
-                        let song_name = if resp.song.is_empty() {
-                            "Lofi chill beats".to_string()
-                        } else {
-                            resp.song.clone()
-                        };
-                        let yt = state.ytmusic.clone();
-                        let sc = state.soundcloud.clone();
-                        let pl = state.player.clone();
-                        let l = state.led.clone();
-                        tokio::spawn(async move {
-                            pl.play_smart_or_query(&yt, &sc, &song_name, &l).await;
-                        });
-                    }
                     "stop" => state.player.stop(&state.led).await,
                     "resume" => state.player.resume(&state.led).await,
                     _ => {}
@@ -1678,14 +1684,32 @@ async fn handle_prompt(
                 )
                 .await;
 
-            if speak && !resp.text.is_empty() {
+            // Sequential TTS Speech -> Music Playback (eliminates ALSA EBUSY contention)
+            let should_speak = speak && !resp.text.is_empty();
+            let should_play = allow_actions && resp.action == "play";
+
+            if should_speak || should_play {
+                let song_name = if resp.song.is_empty() {
+                    "Lofi chill beats".to_string()
+                } else {
+                    resp.song.clone()
+                };
+                let yt = state.ytmusic.clone();
+                let sc = state.soundcloud.clone();
+                let pl = state.player.clone();
                 let tts = state.tts.clone();
-                let led = state.led.clone();
+                let l = state.led.clone();
                 let text = resp.text.clone();
                 let color = resp.color;
+
                 tokio::spawn(async move {
-                    if let Err(e) = tts.speak(&text, color, &led).await {
-                        error!("TTS speak error: {}", e);
+                    if should_speak {
+                        if let Err(e) = tts.speak(&text, color, &l).await {
+                            error!("TTS speak error: {}", e);
+                        }
+                    }
+                    if should_play {
+                        pl.play_smart_or_query(&yt, &sc, &song_name, &l).await;
                     }
                 });
             }
@@ -1800,6 +1824,14 @@ async fn get_config_handler(State(state): State<AppState>) -> impl IntoResponse 
     }
     if !cfg.accounts.soundcloud_token.is_empty() {
         cfg.accounts.soundcloud_token = mask_key(&cfg.accounts.soundcloud_token);
+    }
+    if !cfg.proxy.socks5_url.is_empty() {
+        if let Ok(mut u) = url::Url::parse(&cfg.proxy.socks5_url) {
+            if u.password().is_some() {
+                let _ = u.set_password(Some("***"));
+                cfg.proxy.socks5_url = u.to_string();
+            }
+        }
     }
     Json(cfg)
 }
@@ -3452,17 +3484,37 @@ struct TerminalRunPayload {
 
 async fn terminal_run_handler(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<TerminalRunPayload>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
+    // SEC-01: CSRF & Drive-By RCE protection. Require X-Station-Request header.
+    if !headers.contains_key("x-station-request") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "success": false,
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": "Forbidden: missing X-Station-Request security header",
+                "output": "Forbidden: missing X-Station-Request security header"
+            })),
+        )
+            .into_response();
+    }
+
     let cmd = payload.command.trim();
     if cmd.is_empty() {
-        return Json(serde_json::json!({
-            "success": false,
-            "exit_code": -1,
-            "stdout": "",
-            "stderr": "Command cannot be empty",
-            "output": "Command cannot be empty"
-        }));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "success": false,
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": "Command cannot be empty",
+                "output": "Command cannot be empty"
+            })),
+        )
+            .into_response();
     }
 
     state.logs.push("WARN", &format!("Terminal execution: '{}'", cmd)).await;
@@ -3486,28 +3538,40 @@ async fn terminal_run_handler(
                 stderr.truncate(65536);
                 stderr.push_str("\n... [вывод обрезан до 64 КБ]");
             }
-            Json(serde_json::json!({
-                "success": o.status.success(),
-                "exit_code": o.status.code().unwrap_or(-1),
-                "stdout": stdout,
-                "stderr": stderr,
-                "output": if stdout.is_empty() { stderr } else { stdout },
-            }))
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "success": o.status.success(),
+                    "exit_code": o.status.code().unwrap_or(-1),
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "output": if stdout.is_empty() { stderr } else { stdout },
+                })),
+            )
+                .into_response()
         }
-        Ok(Err(e)) => Json(serde_json::json!({
-            "success": false,
-            "exit_code": -1,
-            "stdout": "",
-            "stderr": e.to_string(),
-            "output": format!("Execution error: {}", e),
-        })),
-        Err(_) => Json(serde_json::json!({
-            "success": false,
-            "exit_code": -1,
-            "stdout": "",
-            "stderr": "Command timed out after 15 seconds",
-            "output": "Command timed out after 15 seconds",
-        })),
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "success": false,
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": e.to_string(),
+                "output": format!("Execution error: {}", e),
+            })),
+        )
+            .into_response(),
+        Err(_) => (
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(serde_json::json!({
+                "success": false,
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": "Command timed out after 15 seconds",
+                "output": "Command timed out after 15 seconds",
+            })),
+        )
+            .into_response(),
     }
 }
 
@@ -3814,14 +3878,11 @@ async fn post_weather_config_handler(
     if let Some(tz) = payload.timezone {
         cfg.weather.timezone = tz;
     }
-    let saved = cfg.clone();
+    save_app_config(&*cfg).await;
+    let saved_weather = cfg.weather.clone();
     drop(cfg);
 
-    if let Ok(json) = serde_json::to_string_pretty(&saved) {
-        let _ = std::fs::write("/data/config.json", json);
-    }
-
-    (StatusCode::OK, Json(serde_json::json!({ "status": "ok", "weather": saved.weather })))
+    (StatusCode::OK, Json(serde_json::json!({ "status": "ok", "weather": saved_weather })))
 }
 
 // ----------------- Timers -----------------
@@ -4137,11 +4198,28 @@ struct HaPlayMediaRequest {
 async fn media_player_play_handler(
     State(state): State<AppState>,
     Json(payload): Json<HaPlayMediaRequest>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
+    state.tts.stop(&state.led);
+
     if let Some(url) = payload.url {
+        let trimmed = url.trim();
+        // SEC-02: Validate stream URL scheme (strictly http:// or https://, no newlines, no local file://)
+        if (!trimmed.starts_with("http://") && !trimmed.starts_with("https://"))
+            || trimmed.contains('\n')
+            || trimmed.contains('\r')
+        {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": "Only HTTP/HTTPS media stream URLs are permitted"
+                })),
+            )
+                .into_response();
+        }
         let title = payload.title.as_deref().unwrap_or("Стрим");
         let artist = payload.artist.as_deref().unwrap_or("Home Assistant");
-        state.player.play_direct_stream(&url, title, artist, None, 0, false, 0, &state.led).await;
+        state.player.play_direct_stream(trimmed, title, artist, None, 0, false, 0, &state.led).await;
     } else if let Some(query) = payload.query {
         state.player.play_smart_or_query(&state.ytmusic, &state.soundcloud, &query, &state.led).await;
     }
@@ -4154,7 +4232,7 @@ async fn media_player_play_handler(
         let _ = ha.sync_media_player_state(&st, vol, &track, &artist, art.as_deref(), dur, pos).await;
     });
 
-    Json(serde_json::json!({ "success": true, "state": "playing" }))
+    (StatusCode::OK, Json(serde_json::json!({ "success": true, "state": "playing" }))).into_response()
 }
 
 async fn sync_ha_media_player_handler(State(state): State<AppState>) -> impl IntoResponse {
