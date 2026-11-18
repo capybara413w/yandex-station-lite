@@ -247,7 +247,20 @@ impl NetworkHardware {
 
     /// Connects to a Wi-Fi network using wpa_cli and saves config
     pub fn connect_wifi(&self, ssid: &str, psk: &str) -> Result<String, String> {
-        info!("Connecting Wi-Fi to SSID: '{}'", ssid);
+        let clean_ssid = ssid.trim();
+        let clean_psk = psk.trim();
+
+        if clean_ssid.is_empty() {
+            return Err("SSID не может быть пустым".to_string());
+        }
+        if clean_ssid.contains('\n') || clean_ssid.contains('\r') || clean_ssid.contains('"') || clean_ssid.len() > 64 {
+            return Err("Недопустимые символы в SSID (запрещены кавычки и переводы строк)".to_string());
+        }
+        if clean_psk.contains('\n') || clean_psk.contains('\r') || clean_psk.contains('"') || clean_psk.len() > 64 {
+            return Err("Недопустимые символы в пароле Wi-Fi".to_string());
+        }
+
+        info!("Connecting Wi-Fi to SSID: '{}'", clean_ssid);
 
         // 1. Add new network ID
         let add_out = Command::new("wpa_cli")
@@ -260,18 +273,18 @@ impl NetworkHardware {
             .map_err(|_| format!("Invalid network ID from wpa_cli: '{}'", net_id_str))?;
 
         // 2. Set SSID: quoted string
-        let ssid_arg = format!("\"{}\"", ssid);
+        let ssid_arg = format!("\"{}\"", clean_ssid);
         let _ = Command::new("wpa_cli")
             .args(["-i", "wlan0", "set_network", &net_id.to_string(), "ssid", &ssid_arg])
             .output();
 
         // 3. Set PSK or Key Management
-        if psk.is_empty() {
+        if clean_psk.is_empty() {
             let _ = Command::new("wpa_cli")
                 .args(["-i", "wlan0", "set_network", &net_id.to_string(), "key_mgmt", "NONE"])
                 .output();
         } else {
-            let psk_arg = format!("\"{}\"", psk);
+            let psk_arg = format!("\"{}\"", clean_psk);
             let _ = Command::new("wpa_cli")
                 .args(["-i", "wlan0", "set_network", &net_id.to_string(), "psk", &psk_arg])
                 .output();
@@ -797,12 +810,23 @@ impl NetworkHardware {
         Ok(results)
     }
 
+    /// Validates standard 6-byte hex MAC address format (e.g. 00:11:22:33:44:55)
+    pub fn is_valid_mac(mac: &str) -> bool {
+        let clean = mac.trim();
+        let parts: Vec<&str> = clean.split(':').collect();
+        parts.len() == 6 && parts.iter().all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()))
+    }
+
     /// Pairs and trusts a Bluetooth device by MAC address
     pub fn pair_bluetooth(&self, mac: &str) -> Result<String, String> {
-        info!("Pairing and trusting Bluetooth device {}", mac);
-        let _ = Command::new("bluetoothctl").args(["pair", mac]).output();
+        let clean_mac = mac.trim();
+        if !Self::is_valid_mac(clean_mac) {
+            return Err(format!("Invalid Bluetooth MAC address format: '{}'", clean_mac));
+        }
+        info!("Pairing and trusting Bluetooth device {}", clean_mac);
+        let _ = Command::new("bluetoothctl").args(["pair", clean_mac]).output();
         let out = Command::new("bluetoothctl")
-            .args(["trust", mac])
+            .args(["trust", clean_mac])
             .output()
             .map_err(|e| format!("bluetoothctl trust error: {}", e))?;
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -811,9 +835,13 @@ impl NetworkHardware {
 
     /// Removes / forgets a Bluetooth device by MAC address
     pub fn remove_bluetooth(&self, mac: &str) -> Result<String, String> {
-        info!("Removing Bluetooth device {}", mac);
+        let clean_mac = mac.trim();
+        if !Self::is_valid_mac(clean_mac) {
+            return Err(format!("Invalid Bluetooth MAC address format: '{}'", clean_mac));
+        }
+        info!("Removing Bluetooth device {}", clean_mac);
         let out = Command::new("bluetoothctl")
-            .args(["remove", mac])
+            .args(["remove", clean_mac])
             .output()
             .map_err(|e| format!("bluetoothctl remove error: {}", e))?;
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -822,9 +850,13 @@ impl NetworkHardware {
 
     /// Connects to a Bluetooth device by MAC address
     pub fn connect_bluetooth(&self, mac: &str) -> Result<String, String> {
-        info!("Connecting Bluetooth to {}", mac);
+        let clean_mac = mac.trim();
+        if !Self::is_valid_mac(clean_mac) {
+            return Err(format!("Invalid Bluetooth MAC address format: '{}'", clean_mac));
+        }
+        info!("Connecting Bluetooth to {}", clean_mac);
         let out = Command::new("bluetoothctl")
-            .args(["connect", mac])
+            .args(["connect", clean_mac])
             .output()
             .map_err(|e| format!("bluetoothctl connect error: {}", e))?;
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -833,9 +865,13 @@ impl NetworkHardware {
 
     /// Disconnects a Bluetooth device by MAC address
     pub fn disconnect_bluetooth(&self, mac: &str) -> Result<String, String> {
-        info!("Disconnecting Bluetooth from {}", mac);
+        let clean_mac = mac.trim();
+        if !Self::is_valid_mac(clean_mac) {
+            return Err(format!("Invalid Bluetooth MAC address format: '{}'", clean_mac));
+        }
+        info!("Disconnecting Bluetooth from {}", clean_mac);
         let out = Command::new("bluetoothctl")
-            .args(["disconnect", mac])
+            .args(["disconnect", clean_mac])
             .output()
             .map_err(|e| format!("bluetoothctl disconnect error: {}", e))?;
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();

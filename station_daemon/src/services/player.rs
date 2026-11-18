@@ -737,12 +737,12 @@ impl PlayerService {
                 };
                 if has_aplay {
                     format!(
-                        "{} -user_agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' {}-nostdin -loglevel error -nostats -i '{}' {}-f s16le -ac 2 -ar 48000 - {}-f s16le -ac 1 -ar 16000 'udp://127.0.0.1:7777?pkt_size=512' | {} -D hw:0,0 -f S16_LE -c 2 -r 48000 -",
+                        "{} -user_agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' {}-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -rw_timeout 10000000 -nostdin -loglevel error -nostats -i '{}' {}-f s16le -ac 2 -ar 48000 - {}-f s16le -ac 1 -ar 16000 'udp://127.0.0.1:7777?pkt_size=512' | {} -D hw:0,0 -f S16_LE -c 2 -r 48000 -",
                         ffmpeg_bin, proxy_arg, safe_url, seek_arg, seek_arg, aplay_bin
                     )
                 } else {
                     format!(
-                        "{} -user_agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' {}-nostdin -loglevel error -nostats -i '{}' {}-f mp3 - {}-f s16le -ac 1 -ar 16000 'udp://127.0.0.1:7777?pkt_size=512' | {} -v -a hw:0,0 -f {} -",
+                        "{} -user_agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' {}-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -rw_timeout 10000000 -nostdin -loglevel error -nostats -i '{}' {}-f mp3 - {}-f s16le -ac 1 -ar 16000 'udp://127.0.0.1:7777?pkt_size=512' | {} -v -a hw:0,0 -f {} -",
                         ffmpeg_bin, proxy_arg, safe_url, seek_arg, seek_arg, mpg123_bin, scale
                     )
                 }
@@ -821,9 +821,12 @@ impl PlayerService {
             .await;
     }
 
-    /// Pause playback via killall -STOP on mpg123 and ffmpeg
+    /// Pause playback cleanly releasing ALSA hw:0,0 device for TTS and alarms
     pub async fn pause(&self, led: &LedController) {
         let (current_pos, _) = self.get_position_and_duration().await;
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        self.clean_stop_current_process().await;
+
         {
             let mut base_guard = self.base_offset_secs.write().await;
             *base_guard = current_pos;
@@ -833,19 +836,31 @@ impl PlayerService {
             *state_guard = PlaybackState::Paused;
         }
 
-        let _ = Command::new("killall")
-            .args(["-STOP", "mpg123", "ffmpeg"])
-            .output();
         let _ = fs::write("/tmp/music_paused", "");
         let _ = fs::remove_file("/tmp/music_playing");
 
         // Flash orange (255, 140, 0) and turn off LEDs
         led.blink(255, 140, 0, 150);
-        info!("Playback paused at {}s via killall -STOP mpg123 ffmpeg", current_pos);
+        info!("Playback paused at {}s, ALSA hw:0,0 released", current_pos);
     }
 
-    /// Resume playback via killall -CONT on mpg123 and ffmpeg
+    /// Resume playback from saved offset releasing or claiming ALSA hw:0,0
     pub async fn resume(&self, led: &LedController) {
+        let url = self.current_stream_url.read().await.clone();
+        if url.is_empty() {
+            warn!("Resume requested but no stream URL is active");
+            return;
+        }
+        let title = self.current_track.read().await.clone();
+        let artist = self.current_artist.read().await.clone();
+        let artwork = self.current_artwork.read().await.clone();
+        let duration = *self.current_duration_secs.read().await;
+        let is_hls = self.is_hls.load(Ordering::Relaxed);
+        let offset = *self.base_offset_secs.read().await;
+
+        let new_gen = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        self.clean_stop_current_process().await;
+
         {
             let mut start_guard = self.playback_start.write().await;
             *start_guard = Some(Instant::now());
@@ -853,15 +868,21 @@ impl PlayerService {
             *state_guard = PlaybackState::Playing;
         }
 
-        let _ = Command::new("killall")
-            .args(["-CONT", "mpg123", "ffmpeg"])
-            .output();
-        let _ = fs::write("/tmp/music_playing", "");
-        let _ = fs::remove_file("/tmp/music_paused");
-
-        // Flash green and restore music aura (45, 0, 64)
         led.blink(0, 255, 100, 150);
-        info!("Playback resumed via killall -CONT mpg123 ffmpeg");
+        info!("Playback resuming from {}s for '{}'", offset, title);
+
+        self.spawn_playback_process(
+            &url,
+            &title,
+            &artist,
+            artwork,
+            duration,
+            is_hls,
+            offset,
+            new_gen,
+            led,
+        )
+        .await;
     }
 
     /// Stop playback via clean stop and reset

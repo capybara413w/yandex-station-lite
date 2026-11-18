@@ -157,7 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tokio::spawn(async move {
         while let Some(initial_prompt) = assistant_rx.recv().await {
-            execute_assistant_turn(
+            let h = tokio::spawn(execute_assistant_turn(
                 initial_prompt,
                 led_ref.clone(),
                 stt_ref.clone(),
@@ -171,8 +171,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tts_ref.clone(),
                 chat_ref.clone(),
                 ww_ref.clone(),
-            )
-            .await;
+            ));
+            if let Err(e) = h.await {
+                error!("Voice assistant turn caught error or panic: {:?}", e);
+                ww_ref.set_processing(false);
+            }
         }
     });
 
@@ -186,6 +189,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tts_clone = tts.clone();
     let timer_alarm_clone = timer_alarm.clone();
     let assistant_tx_clone = assistant_tx.clone();
+    let ww_clone = wakeword.clone();
     let alsa_card_str = initial_config.audio.alsa_card.clone();
     let config_btn = config.clone();
 
@@ -252,14 +256,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Center Touch Sensor: Long Hold (>= 0.7 sec)
                 StationButtonEvent::CenterHold => {
                     info!("Hardware Event: CenterHold >= 700ms (Voice Assistant Trigger)");
-                    // 1. Pause music if playing
+                    // 1. Release ALSA mic device (hw:0,1) immediately from wakeword capture
+                    ww_clone.pause_and_stop_capture();
+                    // 2. Pause music if playing
                     player_clone.pause(&led_clone).await;
-                    // 2. Illuminate Alice Purple
+                    // 3. Illuminate Alice Purple
                     led_clone.set_rgb(180, 0, 255);
-                    // 3. Play soundpack assistant chime
+                    // 4. Play soundpack assistant chime
                     let active_pack = config_btn.read().await.soundpack.active_pack.clone();
                     play_sound(&active_pack, "activation", &alsa_card_str);
-                    // 4. Trigger assistant turn with VAD
+                    // 5. Trigger assistant turn with VAD
                     let _ = assistant_tx_clone.send(None).await;
                 }
             }
@@ -297,7 +303,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let router = web::create_router(app_state);
     let addr: SocketAddr = format!("{}:{}", bind_address, server_port)
         .parse()
-        .unwrap_or_else(|_| "0.0.0.0:5000".parse().unwrap());
+        .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], 5000)));
 
     let local_ip = web::get_local_ip();
     info!("╔════════════════════════════════════════════════════════════════════╗");

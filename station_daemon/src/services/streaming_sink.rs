@@ -271,15 +271,19 @@ impl StreamingService {
     pub async fn stop_all(&self) {
         if let Some(mut c) = self.airplay_child.write().await.take() {
             let _ = c.kill();
+            let _ = c.wait();
         }
         if let Some(mut c) = self.spotify_child.write().await.take() {
             let _ = c.kill();
+            let _ = c.wait();
         }
         if let Some(mut c) = self.snapcast_child.write().await.take() {
             let _ = c.kill();
+            let _ = c.wait();
         }
         if let Some(mut c) = self.bt_sink_child.write().await.take() {
             let _ = c.kill();
+            let _ = c.wait();
             let _ = Command::new("bluetoothctl").args(&["discoverable", "off"]).status();
         }
     }

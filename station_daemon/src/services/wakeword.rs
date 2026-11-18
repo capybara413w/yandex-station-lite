@@ -165,6 +165,12 @@ impl WakeWordService {
         self.is_processing.store(val, Ordering::Relaxed);
     }
 
+    /// Stops background microphone capture immediately to free ALSA mic device (hw:0,1) for STT
+    pub fn pause_and_stop_capture(&self) {
+        self.set_processing(true);
+        let _ = Command::new("killall").args(["-9", "arecord", "yandex_spotter"]).output();
+    }
+
     /// Starts the continuous background listener for the "Алиса" wake-word.
     /// Uses native on-device Yandex Neural Spotter (`/data/yandex_spotter`) when available,
     /// with automatic fallback to cloud VAD if uninstalled.

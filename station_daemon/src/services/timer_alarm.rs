@@ -336,6 +336,10 @@ impl TimerAlarmService {
                 }
             });
 
+            // Ensure ALSA hw:0,0 is released by background playback decoders
+            let _ = Command::new("killall").args(["-TERM", "aplay", "ffmpeg"]).output();
+            tokio::time::sleep(tokio::time::Duration::from_millis(60)).await;
+
             // Read volume scale from /data/volume
             let vol_step = fs::read_to_string("/data/volume")
                 .ok()

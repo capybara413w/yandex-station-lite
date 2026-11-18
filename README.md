@@ -119,7 +119,8 @@ npm run build
 ```powershell
 tools\adb.exe connect 192.168.0.105:5555
 tools\adb.exe push station_daemon\target\aarch64-unknown-linux-musl\release\station_daemon /data/station_daemon
-tools\adb.exe push dist /data/station_web
+tools\adb.exe shell "rm -rf /data/station_web/*"
+tools\adb.exe push dist/. /data/station_web
 tools\adb.exe shell "chmod +x /data/station_daemon; killall -9 station_daemon; /sbin/start-stop-daemon -S -b -m -p /tmp/station_daemon.pid -x /data/station_daemon"
 ```
 
@@ -137,10 +138,10 @@ http://192.168.0.105:5000
 * **Ассистент и Диалог**: переписка с голосовым ассистентом, история сессий, управление провайдерами LLM / STT / TTS.
 * **Звуковые пакеты**: мгновенное переключение алгоритмических паков и их тестирование.
 * **Умный дом (Home Assistant)**: мониторинг состояния подключений, переключение устройств, вызовы служб.
-* **Система и Настройки**: мониторинг RAM (70-75 МБ), температуры CPU, управление громкостью, таймерами, будильниками и Wi-Fi.
+* **Система и Настройки**: мониторинг RAM (70-75 МБ), температуры CPU, управление громкостью, таймерами, будильниками, Wi-Fi, энергосбережением чипа 88x2cs, Bluetooth, **SOCKS5/VPN прокси** и **персистентным DNS** (Cloudflare, Google, AdGuard, Яндекс, Quad9, Custom).
 
 ---
 
 ## 📄 Лицензия
 
-Проект распространяется под лицензией MIT. Разработано для энтузиастов автономных смарт-устройств.
+Проект распространяется под свободной лицензией **GNU General Public License v3.0 (GPLv3)**. Полный текст доступен в файле [LICENSE](file:///c:/Users/boykiser/Downloads/Station/LICENSE). Разработано для энтузиастов автономных смарт-устройств.

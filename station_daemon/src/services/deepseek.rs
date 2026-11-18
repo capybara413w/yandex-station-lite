@@ -467,8 +467,8 @@ impl DeepSeekService {
         }
 
         // If direct parse fails, try extracting JSON substring
-        if let Some(start) = cleaned.find('{') {
-            if let Some(end) = cleaned.rfind('}') {
+        if let (Some(start), Some(end)) = (cleaned.find('{'), cleaned.rfind('}')) {
+            if start <= end {
                 if let Ok(resp) = serde_json::from_str::<DeepSeekResponse>(&cleaned[start..=end]) {
                     return resp;
                 }

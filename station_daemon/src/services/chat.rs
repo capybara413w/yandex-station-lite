@@ -103,11 +103,23 @@ impl ChatService {
         if path.exists() {
             match std::fs::read_to_string(path) {
                 Ok(content) => match serde_json::from_str::<ChatStore>(&content) {
-                    Ok(store) => {
-                        // Filter out already deleted sessions if needed, or keep them with is_deleted=true
+                    Ok(mut store) => {
+                        // Purge deleted sessions to conserve RAM and flash memory
+                        store.sessions.retain(|s| !s.is_deleted);
+                        if store.sessions.len() > 25 {
+                            store.sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+                            store.sessions.truncate(25);
+                        }
+                        // Truncate messages in each session if needed
+                        for s in store.sessions.iter_mut() {
+                            if s.messages.len() > 40 {
+                                let excess = s.messages.len() - 40;
+                                s.messages.drain(0..excess);
+                            }
+                        }
                         info!(
-                            "Loaded {} chat sessions from {}",
-                            store.sessions.iter().filter(|s| !s.is_deleted).count(),
+                            "Loaded {} active chat sessions from {}",
+                            store.sessions.len(),
                             path.display()
                         );
                         return store;
@@ -203,7 +215,12 @@ impl ChatService {
             }
         }
 
-        // Start new chat session
+        // Start new chat session (prune oldest if at limit)
+        if store.sessions.len() >= 25 {
+            store.sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+            store.sessions.truncate(24);
+        }
+
         let new_id = generate_id("chat");
         let new_session = ChatSession {
             id: new_id.clone(),
@@ -283,6 +300,12 @@ impl ChatService {
                 },
             });
 
+            // Cap messages to prevent memory leak and huge JSON
+            if session.messages.len() > 40 {
+                let excess = session.messages.len() - 40;
+                session.messages.drain(0..excess);
+            }
+
             session.updated_at = now;
         } else {
             warn!("Chat session '{}' not found to record turn", session_id);
@@ -342,6 +365,11 @@ impl ChatService {
         let now = now_secs();
         let mut store = self.store.write().await;
 
+        if store.sessions.len() >= 25 {
+            store.sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+            store.sessions.truncate(24);
+        }
+
         let session = ChatSession {
             id: generate_id("chat"),
             title: title
@@ -361,27 +389,25 @@ impl ChatService {
         result
     }
 
-    /// Deletes a session by marking `is_deleted = true`.
-    /// Deleted sessions are completely ignored in history, context and UI.
+    /// Deletes a session by removing it from memory and disk.
     pub async fn delete_session(&self, id: &str) -> bool {
         let mut store = self.store.write().await;
-        if let Some(s) = store.sessions.iter_mut().find(|s| s.id == id && !s.is_deleted) {
-            s.is_deleted = true;
+        let before_len = store.sessions.len();
+        store.sessions.retain(|s| s.id != id);
+        if store.sessions.len() < before_len {
             drop(store);
             self.persist_store().await;
-            info!("Deleted chat session '{}'", id);
+            info!("Deleted and pruned chat session '{}'", id);
             true
         } else {
             false
         }
     }
 
-    /// Clears all sessions (marks all as deleted).
+    /// Clears all sessions completely.
     pub async fn clear_all_sessions(&self) {
         let mut store = self.store.write().await;
-        for s in store.sessions.iter_mut() {
-            s.is_deleted = true;
-        }
+        store.sessions.clear();
         drop(store);
         self.persist_store().await;
         info!("Cleared all chat sessions");

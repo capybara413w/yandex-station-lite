@@ -10,7 +10,7 @@ use crate::services::{
 };
 use crate::services::homeassistant::{HassCallServiceRequest, HassProcessRequest};
 use axum::{
-    extract::{Path as AxumPath, Query, State},
+    extract::{DefaultBodyLimit, Path as AxumPath, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse},
     routing::{delete, get, post, put},
@@ -266,6 +266,7 @@ pub fn create_router(state: AppState) -> Router {
         .nest_service("/static", ServeDir::new(static_dir))
         .nest_service("/assets", ServeDir::new("/data/station_web/assets"))
         .nest_service("/fonts", ServeDir::new("/data/station_web/fonts"))
+        .layer(DefaultBodyLimit::max(64 * 1024))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
@@ -1558,7 +1559,7 @@ async fn post_ask_handler(
     State(state): State<AppState>,
     Json(payload): Json<AskRequest>,
 ) -> impl IntoResponse {
-    handle_prompt(&state, &payload.prompt, payload.speak.unwrap_or(true), payload.session_id).await
+    handle_prompt(&state, &payload.prompt, payload.speak.unwrap_or(true), payload.session_id, true).await
 }
 
 #[derive(Deserialize)]
@@ -1572,7 +1573,8 @@ async fn get_ask_handler(
     State(state): State<AppState>,
     Query(query): Query<AskQuery>,
 ) -> impl IntoResponse {
-    handle_prompt(&state, &query.q, true, query.session_id).await
+    // GET /ask is CSRF-safe & read-only (no speaker speech, no Home Assistant triggers)
+    handle_prompt(&state, &query.q, false, query.session_id, false).await
 }
 
 async fn handle_prompt(
@@ -1580,6 +1582,7 @@ async fn handle_prompt(
     prompt_text: &str,
     speak: bool,
     session_id_req: Option<String>,
+    allow_actions: bool,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let prompt = prompt_text.trim();
     if prompt.is_empty() {
@@ -1620,27 +1623,50 @@ async fn handle_prompt(
         Ok(resp) => {
             state.led.set_rgb(resp.color[0], resp.color[1], resp.color[2]);
 
-            // Execute any Home Assistant API calls returned by LLM
-            for ha_call in &resp.ha_calls {
-                info!("Web LLM calling Home Assistant: {}/{} data={:?}", ha_call.domain, ha_call.service, ha_call.service_data);
-                if let Err(e) = state.homeassistant.call_service(&ha_call.domain, &ha_call.service, ha_call.service_data.clone()).await {
-                    error!("Failed to execute HA call {}/{}: {}", ha_call.domain, ha_call.service, e);
+            // Execute smart home, timer and player actions only if allowed (POST requests)
+            if allow_actions {
+                // Execute any Home Assistant API calls returned by LLM
+                for ha_call in &resp.ha_calls {
+                    info!("Web LLM calling Home Assistant: {}/{} data={:?}", ha_call.domain, ha_call.service, ha_call.service_data);
+                    if let Err(e) = state.homeassistant.call_service(&ha_call.domain, &ha_call.service, ha_call.service_data.clone()).await {
+                        error!("Failed to execute HA call {}/{}: {}", ha_call.domain, ha_call.service, e);
+                    }
                 }
-            }
 
-            // Execute Timer calls returned strictly by LLM
-            if let Some(t_call) = &resp.timer_call {
-                state.timer_alarm.process_timer_call(t_call).await;
-            }
+                // Execute Timer calls returned strictly by LLM
+                if let Some(t_call) = &resp.timer_call {
+                    state.timer_alarm.process_timer_call(t_call).await;
+                }
 
-            // Execute Alarm calls returned strictly by LLM
-            if let Some(a_call) = &resp.alarm_call {
-                state.timer_alarm.process_alarm_call(a_call).await;
-            }
+                // Execute Alarm calls returned strictly by LLM
+                if let Some(a_call) = &resp.alarm_call {
+                    state.timer_alarm.process_alarm_call(a_call).await;
+                }
 
-            // Stop alarm/timer chime if requested or if ringing
-            if resp.action == "stop" || state.timer_alarm.is_ringing() {
-                state.timer_alarm.stop_ringing();
+                // Stop alarm/timer chime if requested or if ringing
+                if resp.action == "stop" || state.timer_alarm.is_ringing() {
+                    state.timer_alarm.stop_ringing();
+                }
+
+                match resp.action.as_str() {
+                    "play" => {
+                        let song_name = if resp.song.is_empty() {
+                            "Lofi chill beats".to_string()
+                        } else {
+                            resp.song.clone()
+                        };
+                        let yt = state.ytmusic.clone();
+                        let sc = state.soundcloud.clone();
+                        let pl = state.player.clone();
+                        let l = state.led.clone();
+                        tokio::spawn(async move {
+                            pl.play_smart_or_query(&yt, &sc, &song_name, &l).await;
+                        });
+                    }
+                    "stop" => state.player.stop(&state.led).await,
+                    "resume" => state.player.resume(&state.led).await,
+                    _ => {}
+                }
             }
 
             state
@@ -1680,27 +1706,7 @@ async fn handle_prompt(
                 });
             }
 
-            match resp.action.as_str() {
-                "play" => {
-                    let song_name = if resp.song.is_empty() {
-                        "Lofi chill beats".to_string()
-                    } else {
-                        resp.song.clone()
-                    };
-                    let yt = state.ytmusic.clone();
-                    let sc = state.soundcloud.clone();
-                    let pl = state.player.clone();
-                    let l = state.led.clone();
-                    tokio::spawn(async move {
-                        pl.play_smart_or_query(&yt, &sc, &song_name, &l).await;
-                    });
-                }
-                "stop" => state.player.stop(&state.led).await,
-                "resume" => state.player.resume(&state.led).await,
-                _ => {}
-            }
-
-            let mut val = serde_json::to_value(&resp).unwrap();
+            let mut val = serde_json::to_value(&resp).unwrap_or_else(|_| serde_json::json!({}));
             if let Some(obj) = val.as_object_mut() {
                 obj.insert("session_id".to_string(), serde_json::json!(session_id));
                 obj.insert("is_new_session".to_string(), serde_json::json!(is_new));
@@ -1789,6 +1795,24 @@ async fn get_config_handler(State(state): State<AppState>) -> impl IntoResponse 
     }
     if !cfg.tts.cartesia.api_key.is_empty() {
         cfg.tts.cartesia.api_key = mask_key(&cfg.tts.cartesia.api_key);
+    }
+    if !cfg.deepseek.cloudflare_api_token.is_empty() {
+        cfg.deepseek.cloudflare_api_token = mask_key(&cfg.deepseek.cloudflare_api_token);
+    }
+    if !cfg.homeassistant.token.is_empty() {
+        cfg.homeassistant.token = mask_key(&cfg.homeassistant.token);
+    }
+    if !cfg.accounts.ytmusic_cookie.is_empty() {
+        cfg.accounts.ytmusic_cookie = "Cookie установлен [Скрыто]".to_string();
+    }
+    if !cfg.accounts.spotify_client_secret.is_empty() {
+        cfg.accounts.spotify_client_secret = mask_key(&cfg.accounts.spotify_client_secret);
+    }
+    if !cfg.accounts.spotify_refresh_token.is_empty() {
+        cfg.accounts.spotify_refresh_token = mask_key(&cfg.accounts.spotify_refresh_token);
+    }
+    if !cfg.accounts.soundcloud_token.is_empty() {
+        cfg.accounts.soundcloud_token = mask_key(&cfg.accounts.soundcloud_token);
     }
     Json(cfg)
 }
@@ -2200,7 +2224,7 @@ async fn post_assistant_config_handler(
         }
         if let Some(ref k) = llm.api_key {
             let k_clean = k.trim();
-            if !k_clean.is_empty() && !k_clean.starts_with('*') {
+            if !k_clean.is_empty() && !is_masked(k_clean) {
                 match cfg.deepseek.provider.as_str() {
                     "openrouter" => cfg.deepseek.openrouter_api_key = k_clean.to_string(),
                     "cloudflare" => cfg.deepseek.cloudflare_api_token = k_clean.to_string(),
@@ -2250,7 +2274,7 @@ async fn post_assistant_config_handler(
         }
         if let Some(ref k) = stt.api_key {
             let k_clean = k.trim();
-            if !k_clean.is_empty() && !k_clean.starts_with('*') {
+            if !k_clean.is_empty() && !is_masked(k_clean) {
                 if cfg.stt.provider == "openrouter" {
                     cfg.stt.openrouter_api_key = k_clean.to_string();
                 } else if cfg.stt.provider == "gemini" {
@@ -2313,7 +2337,7 @@ async fn post_assistant_config_handler(
         }
         if let Some(ref k) = tts.api_key {
             let k_clean = k.trim();
-            if !k_clean.is_empty() && !k_clean.starts_with('*') {
+            if !k_clean.is_empty() && !is_masked(k_clean) {
                 match cfg.tts.provider.as_str() {
                     "openrouter" => cfg.tts.openrouter.api_key = k_clean.to_string(),
                     "cloudflare" => cfg.tts.cloudflare.api_token = k_clean.to_string(),
@@ -2377,9 +2401,17 @@ async fn post_assistant_config_handler(
     )
 }
 
+fn is_masked(val: &str) -> bool {
+    let t = val.trim();
+    t.starts_with('*') || t.contains("...")
+}
+
 fn mask_key(k: &str) -> String {
-    if k.len() > 8 {
-        format!("{}...{}", &k[..4], &k[k.len() - 4..])
+    let chars: Vec<char> = k.chars().collect();
+    if chars.len() > 8 {
+        let prefix: String = chars[..4].iter().collect();
+        let suffix: String = chars[chars.len() - 4..].iter().collect();
+        format!("{}...{}", prefix, suffix)
     } else {
         "***".to_string()
     }
@@ -2549,7 +2581,7 @@ async fn post_config_handler(
         cfg.deepseek.cloudflare_account_id = acc.trim().to_string();
     }
     if let Some(tok) = payload.cloudflare_llm_api_token {
-        if !tok.trim().starts_with('*') {
+        if !is_masked(tok.trim()) {
             cfg.deepseek.cloudflare_api_token = tok.trim().to_string();
         }
     }
@@ -2590,7 +2622,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.openrouter_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.deepseek.openrouter_api_key = trimmed.to_string();
         }
     }
@@ -2601,7 +2633,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.groq_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.deepseek.groq_api_key = trimmed.to_string();
         }
     }
@@ -2612,7 +2644,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.openai_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.deepseek.openai_api_key = trimmed.to_string();
         }
     }
@@ -2623,7 +2655,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.mistral_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.deepseek.mistral_api_key = trimmed.to_string();
         }
     }
@@ -2642,7 +2674,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.deepseek_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.deepseek.api_key = trimmed.to_string();
         }
     }
@@ -2656,7 +2688,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.openai_tts_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.tts.openai.api_key = trimmed.to_string();
         }
     }
@@ -2677,7 +2709,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.cloudflare_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.stt.api_key = trimmed.to_string();
         }
     }
@@ -2693,7 +2725,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.elevenlabs_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.tts.elevenlabs.api_key = trimmed.to_string();
         }
     }
@@ -2714,7 +2746,7 @@ async fn post_config_handler(
     }
     if let Some(tok) = payload.cloudflare_tts_api_token {
         let trimmed = tok.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.tts.cloudflare.api_token = trimmed.to_string();
         }
     }
@@ -2725,7 +2757,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.anthropic_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.deepseek.anthropic_api_key = trimmed.to_string();
         }
     }
@@ -2736,7 +2768,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.gemini_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.deepseek.gemini_api_key = trimmed.to_string();
         }
     }
@@ -2747,7 +2779,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.perplexity_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.deepseek.perplexity_api_key = trimmed.to_string();
         }
     }
@@ -2758,7 +2790,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.together_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.deepseek.together_api_key = trimmed.to_string();
         }
     }
@@ -2774,7 +2806,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.openrouter_stt_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.stt.openrouter_api_key = trimmed.to_string();
         }
     }
@@ -2785,7 +2817,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.openrouter_tts_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.tts.openrouter.api_key = trimmed.to_string();
         }
     }
@@ -2801,7 +2833,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.openai_stt_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.stt.openai_api_key = trimmed.to_string();
         }
     }
@@ -2812,7 +2844,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.groq_stt_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.stt.groq_api_key = trimmed.to_string();
         }
     }
@@ -2823,7 +2855,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.deepgram_stt_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.stt.deepgram_api_key = trimmed.to_string();
         }
     }
@@ -2837,7 +2869,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.deepgram_tts_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.tts.deepgram.api_key = trimmed.to_string();
         }
     }
@@ -2848,7 +2880,7 @@ async fn post_config_handler(
     }
     if let Some(key) = payload.cartesia_tts_api_key {
         let trimmed = key.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('*') {
+        if !trimmed.is_empty() && !is_masked(trimmed) {
             cfg.tts.cartesia.api_key = trimmed.to_string();
         }
     }
@@ -3017,7 +3049,11 @@ async fn get_wifi_status_handler(State(state): State<AppState>) -> impl IntoResp
 }
 
 async fn scan_wifi_handler(State(state): State<AppState>) -> impl IntoResponse {
-    match state.network.scan_wifi() {
+    let net = state.network.clone();
+    let res = tokio::task::spawn_blocking(move || net.scan_wifi())
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()));
+    match res {
         Ok(list) => (
             StatusCode::OK,
             Json(serde_json::json!({ "success": true, "networks": list })),
@@ -3277,7 +3313,11 @@ async fn set_bluetooth_discoverable_handler(
 }
 
 async fn scan_bluetooth_handler(State(state): State<AppState>) -> impl IntoResponse {
-    match state.network.scan_bluetooth() {
+    let net = state.network.clone();
+    let res = tokio::task::spawn_blocking(move || net.scan_bluetooth())
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()));
+    match res {
         Ok(list) => (
             StatusCode::OK,
             Json(serde_json::json!({ "success": true, "devices": list })),
@@ -3392,11 +3432,24 @@ struct TerminalRunPayload {
 }
 
 async fn terminal_run_handler(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(payload): Json<TerminalRunPayload>,
 ) -> impl IntoResponse {
+    let cmd = payload.command.trim();
+    if cmd.is_empty() {
+        return Json(serde_json::json!({
+            "success": false,
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": "Command cannot be empty",
+            "output": "Command cannot be empty"
+        }));
+    }
+
+    state.logs.push("WARN", &format!("Terminal execution: '{}'", cmd)).await;
+
     let out = std::process::Command::new("sh")
-        .args(["-c", &payload.command])
+        .args(["-c", cmd])
         .output();
 
     match out {
@@ -3699,7 +3752,7 @@ async fn get_weather_handler(
     };
 
     match res {
-        Ok(report) => (StatusCode::OK, Json(serde_json::to_value(report).unwrap())),
+        Ok(report) => (StatusCode::OK, Json(serde_json::to_value(report).unwrap_or_else(|_| serde_json::json!({})))),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": e })),
@@ -3775,7 +3828,7 @@ async fn post_timer_handler(
     Json(payload): Json<CreateTimerRequest>,
 ) -> impl IntoResponse {
     let timer = state.timer_alarm.add_timer(payload.duration, payload.label.as_deref()).await;
-    (StatusCode::CREATED, Json(serde_json::to_value(timer).unwrap()))
+    (StatusCode::CREATED, Json(serde_json::to_value(timer).unwrap_or_else(|_| serde_json::json!({}))))
 }
 
 async fn cancel_all_timers_handler(State(state): State<AppState>) -> impl IntoResponse {
@@ -3817,7 +3870,7 @@ async fn post_alarm_handler(
     Json(payload): Json<CreateAlarmRequest>,
 ) -> impl IntoResponse {
     match state.timer_alarm.add_alarm(&payload.time, payload.label.as_deref(), payload.repeat.as_deref()).await {
-        Ok(alarm) => (StatusCode::CREATED, Json(serde_json::to_value(alarm).unwrap())),
+        Ok(alarm) => (StatusCode::CREATED, Json(serde_json::to_value(alarm).unwrap_or_else(|_| serde_json::json!({})))),
         Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e }))),
     }
 }

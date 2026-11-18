@@ -47,7 +47,7 @@ impl ButtonsListener {
         // Ensure stale /tmp/listen.lock from previous aborted sessions is cleaned up immediately
         let _ = std::fs::remove_file("/tmp/listen.lock");
 
-        std::thread::Builder::new()
+        let builder_res = std::thread::Builder::new()
             .name("evdev-buttons".into())
             .spawn(move || {
                 info!("Starting hardware buttons listener on {}", self.device_path);
@@ -153,8 +153,10 @@ impl ButtonsListener {
                         warn!("Failed to open evdev device {}: {}", self.device_path, e);
                     }
                 }
-            })
-            .expect("Failed to spawn evdev-buttons thread");
+            });
+        if let Err(e) = builder_res {
+            error!("Failed to spawn evdev-buttons thread: {}", e);
+        }
     }
 }
 
@@ -339,14 +341,16 @@ impl AudioHardware {
         self.current_volume_step.load(Ordering::SeqCst)
     }
 
-    /// Sets volume step (1-10), writes to /data/volume, and updates TAS5805M mixer register.
+    /// Sets volume step (1-10), writes to /data/volume if changed, and updates TAS5805M mixer register.
     pub fn set_volume(&self, step: u8) -> u8 {
         let clamped = step.clamp(1, 10);
-        self.current_volume_step.store(clamped, Ordering::SeqCst);
+        let prev_val = self.current_volume_step.swap(clamped, Ordering::SeqCst);
         let (raw_val, db_str) = Self::map_volume_to_tas5805m(clamped);
 
-        // Persist to /data/volume
-        let _ = fs::write("/data/volume", format!("{}\n", clamped));
+        // Persist to /data/volume only if changed to prevent flash wear
+        if prev_val != clamped {
+            let _ = fs::write("/data/volume", format!("{}\n", clamped));
+        }
 
         // Apply via amixer sset / cset
         let amixer_bin = if Path::new("/opt/bin/amixer").exists() {
