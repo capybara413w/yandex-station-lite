@@ -2926,7 +2926,18 @@ async fn post_config_handler(
     if let Some(p_url) = payload.socks5_url.or(payload.proxy_socks5_url) {
         let trimmed = p_url.trim().to_string();
         if !trimmed.is_empty() {
-            cfg.proxy.socks5_url = trimmed;
+            if trimmed.contains("***") {
+                if let (Ok(mut new_u), Ok(old_u)) = (url::Url::parse(&trimmed), url::Url::parse(&cfg.proxy.socks5_url)) {
+                    if new_u.password() == Some("***") {
+                        if let Some(old_pwd) = old_u.password() {
+                            let _ = new_u.set_password(Some(old_pwd));
+                            cfg.proxy.socks5_url = new_u.to_string();
+                        }
+                    }
+                }
+            } else {
+                cfg.proxy.socks5_url = trimmed;
+            }
         }
     }
     if let Some(d_en) = payload.dns_custom_enabled {

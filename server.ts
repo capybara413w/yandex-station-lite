@@ -1187,7 +1187,10 @@ async function forwardToDaemonOrAdb(
     const timeout = setTimeout(() => controller.abort(), 2000);
     const res = await fetch(`http://${targetIp}:5000${path}`, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      headers: {
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        'X-Station-Request': '1',
+      },
       body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
