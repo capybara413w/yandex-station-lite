@@ -220,7 +220,6 @@ impl WeatherService {
             .trim()
             .trim_end_matches("°C")
             .trim_start_matches('+')
-            .trim_start_matches('-')
             .parse()
             .unwrap_or(temp);
         let emoji = parts[3].trim();

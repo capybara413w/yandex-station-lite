@@ -1345,7 +1345,11 @@ export default function App() {
 
     setResponsePreview('Генерация ответа через ассистента...');
     try {
-      const res = await fetch(`/ask?q=${encodeURIComponent(q)}`);
+      const res = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q, speak: false })
+      });
       const data = await res.json();
       setResponsePreview(data.text || '(пустой ответ)');
       if (Array.isArray(data.color) && data.color.length === 3) {

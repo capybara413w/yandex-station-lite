@@ -846,6 +846,11 @@ impl PlayerService {
 
     /// Resume playback from saved offset releasing or claiming ALSA hw:0,0
     pub async fn resume(&self, led: &LedController) {
+        if *self.state.read().await == PlaybackState::Playing {
+            info!("Resume called but playback is already Playing; ignoring");
+            return;
+        }
+
         let url = self.current_stream_url.read().await.clone();
         if url.is_empty() {
             warn!("Resume requested but no stream URL is active");
@@ -891,11 +896,10 @@ impl PlayerService {
         self.clean_stop_current_process().await;
 
         {
-            let mut state_guard = self.state.write().await;
-            *state_guard = PlaybackState::Stopped;
             *self.base_offset_secs.write().await = 0;
             *self.current_duration_secs.write().await = 0;
             *self.playback_start.write().await = None;
+            *self.state.write().await = PlaybackState::Stopped;
         }
 
         led.clear();

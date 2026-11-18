@@ -129,6 +129,12 @@ impl HomeAssistantService {
         service: &str,
         service_data: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
+        if !domain.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            || !service.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err("Invalid characters in Home Assistant domain or service".to_string());
+        }
+
         let (base_url, token) = self.get_auth().await?;
         let url = format!("{}/api/services/{}/{}", base_url, domain, service);
 

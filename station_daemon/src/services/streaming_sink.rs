@@ -22,6 +22,16 @@ pub struct StreamingStatus {
     pub bluetooth_sink_running: bool,
 }
 
+fn sanitize_name(input: &str, fallback: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.is_empty() || trimmed.starts_with('-') {
+        fallback.to_string()
+    } else {
+        let clean: String = trimmed.chars().take(64).filter(|c| c.is_alphanumeric() || " _-".contains(*c)).collect();
+        if clean.is_empty() { fallback.to_string() } else { clean }
+    }
+}
+
 pub struct StreamingService {
     config: Arc<RwLock<AppConfig>>,
     airplay_child: Arc<RwLock<Option<Child>>>,
@@ -116,12 +126,19 @@ impl StreamingService {
         }
     }
 
+    /// Restarts all enabled streaming services, stopping any existing instances first.
+    pub async fn restart_services(&self) {
+        self.stop_all().await;
+        self.sync_services().await;
+    }
+
     fn spawn_airplay(name: &str, alsa_card: &str) -> Option<Child> {
+        let safe_name = sanitize_name(name, "Yandex Station Lite");
         // Check for station-airplay or shairport-sync
         let candidates = [
-            ("/data/station-airplay", vec!["--name", name, "--alsa", alsa_card]),
-            ("station-airplay", vec!["--name", name, "--alsa", alsa_card]),
-            ("shairport-sync", vec!["-a", name, "--", "-d", alsa_card]),
+            ("/data/station-airplay", vec!["--name", safe_name.as_str(), "--alsa", alsa_card]),
+            ("station-airplay", vec!["--name", safe_name.as_str(), "--alsa", alsa_card]),
+            ("shairport-sync", vec!["-a", safe_name.as_str(), "--", "-d", alsa_card]),
         ];
 
         for (bin, args) in candidates {
@@ -132,7 +149,7 @@ impl StreamingService {
                 .spawn()
             {
                 Ok(child) => {
-                    info!("AirPlay receiver started ({}) with name '{}'", bin, name);
+                    info!("AirPlay receiver started ({}) with name '{}'", bin, safe_name);
                     return Some(child);
                 }
                 Err(_) => continue,
@@ -143,6 +160,7 @@ impl StreamingService {
     }
 
     fn spawn_spotify(name: &str, alsa_card: &str) -> Option<Child> {
+        let safe_name = sanitize_name(name, "Yandex Station Lite");
         let candidates = [
             "/data/librespot",
             "/usr/bin/librespot",
@@ -152,7 +170,7 @@ impl StreamingService {
         for bin in candidates {
             match Command::new(bin)
                 .args(&[
-                    "--name", name,
+                    "--name", &safe_name,
                     "--backend", "alsa",
                     "--device", alsa_card,
                     "--bitrate", "320",
@@ -164,7 +182,7 @@ impl StreamingService {
                 .spawn()
             {
                 Ok(child) => {
-                    info!("Spotify Connect receiver started ({}) with name '{}'", bin, name);
+                    info!("Spotify Connect receiver started ({}) with name '{}'", bin, safe_name);
                     return Some(child);
                 }
                 Err(_) => continue,
@@ -175,6 +193,11 @@ impl StreamingService {
     }
 
     fn spawn_snapcast(server: &str, port: u16) -> Option<Child> {
+        let safe_server = if server.trim().starts_with('-') || server.trim().is_empty() {
+            "127.0.0.1"
+        } else {
+            server.trim()
+        };
         let candidates = [
             "/data/snapclient",
             "/usr/bin/snapclient",
@@ -183,13 +206,13 @@ impl StreamingService {
 
         for bin in candidates {
             match Command::new(bin)
-                .args(&["-h", server, "-p", &port.to_string()])
+                .args(&["-h", safe_server, "-p", &port.to_string()])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
             {
                 Ok(child) => {
-                    info!("Snapcast client started connecting to {}:{}", server, port);
+                    info!("Snapcast client started connecting to {}:{}", safe_server, port);
                     return Some(child);
                 }
                 Err(_) => continue,

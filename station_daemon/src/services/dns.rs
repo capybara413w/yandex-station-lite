@@ -20,6 +20,13 @@ pub async fn apply_dns(cfg: &DnsConfig) -> Result<(), String> {
         };
         let sec = cfg.secondary_dns.trim();
 
+        if prim.parse::<std::net::IpAddr>().is_err() {
+            return Err(format!("Некорректный IP-адрес первичного DNS: {}", prim));
+        }
+        if !sec.is_empty() && sec.parse::<std::net::IpAddr>().is_err() {
+            return Err(format!("Некорректный IP-адрес вторичного DNS: {}", sec));
+        }
+
         let mut resolv_content = String::new();
         resolv_content.push_str("# Configured by station_daemon (Custom DNS)\n");
         resolv_content.push_str(&format!("nameserver {}\n", prim));
@@ -100,17 +107,22 @@ pub async fn test_dns_resolution(host: &str) -> Result<(String, u64), String> {
     };
 
     let start = Instant::now();
-    let res = tokio::net::lookup_host((target_host, 80u16)).await;
+    let res = tokio::time::timeout(
+        std::time::Duration::from_secs(4),
+        tokio::net::lookup_host((target_host, 80u16)),
+    )
+    .await;
     let elapsed_ms = start.elapsed().as_millis() as u64;
 
     match res {
-        Ok(mut addrs) => {
+        Ok(Ok(mut addrs)) => {
             if let Some(addr) = addrs.next() {
                 Ok((addr.ip().to_string(), elapsed_ms))
             } else {
                 Err(format!("Хост {} не вернул IP-адресов", target_host))
             }
         }
-        Err(e) => Err(format!("Ошибка разрешения {}: {}", target_host, e)),
+        Ok(Err(e)) => Err(format!("Ошибка разрешения {}: {}", target_host, e)),
+        Err(_) => Err(format!("Таймаут разрешения DNS для {} (4с)", target_host)),
     }
 }

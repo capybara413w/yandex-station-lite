@@ -72,9 +72,11 @@ impl ProxyBridge {
     }
 
     async fn handle_client(&self, mut client: TcpStream) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Read initial HTTP request header (e.g. CONNECT host:port HTTP/1.1)
+        // Read initial HTTP request header (e.g. CONNECT host:port HTTP/1.1) with 10s timeout
         let mut buf = [0u8; 4096];
-        let n = client.read(&mut buf).await?;
+        let n = tokio::time::timeout(std::time::Duration::from_secs(10), client.read(&mut buf))
+            .await
+            .map_err(|_| "Client read header timeout")??;
         if n == 0 {
             return Ok(());
         }
@@ -127,18 +129,23 @@ impl ProxyBridge {
             return Ok(());
         }
 
-        // Connect to destination through remote SOCKS5 proxy
-        let mut server = if !username.is_empty() {
-            Socks5Stream::connect_with_password(
-                proxy_target_addr.as_str(),
-                (dest_host.as_str(), dest_port),
-                username,
-                password,
-            )
-            .await?
-        } else {
-            Socks5Stream::connect(proxy_target_addr.as_str(), (dest_host.as_str(), dest_port)).await?
-        };
+        // Connect to destination through remote SOCKS5 proxy with 10s timeout
+        let mut server = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            if !username.is_empty() {
+                Socks5Stream::connect_with_password(
+                    proxy_target_addr.as_str(),
+                    (dest_host.as_str(), dest_port),
+                    username,
+                    password,
+                )
+                .await
+            } else {
+                Socks5Stream::connect(proxy_target_addr.as_str(), (dest_host.as_str(), dest_port)).await
+            }
+        })
+        .await
+        .map_err(|_| "SOCKS5 proxy connection timeout")?
+        .map_err(|e| format!("SOCKS5 connect error: {}", e))?;
 
         if method.eq_ignore_ascii_case("CONNECT") {
             client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await?;

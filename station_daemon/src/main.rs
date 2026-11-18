@@ -174,6 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ));
             if let Err(e) = h.await {
                 error!("Voice assistant turn caught error or panic: {:?}", e);
+                let _ = std::fs::remove_file("/tmp/listen.lock");
                 ww_ref.set_processing(false);
             }
         }
@@ -262,9 +263,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     player_clone.pause(&led_clone).await;
                     // 3. Illuminate Alice Purple
                     led_clone.set_rgb(180, 0, 255);
-                    // 4. Play soundpack assistant chime
+                    // 4. Play soundpack assistant chime without blocking Tokio thread
                     let active_pack = config_btn.read().await.soundpack.active_pack.clone();
-                    play_sound(&active_pack, "activation", &alsa_card_str);
+                    let card = alsa_card_str.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        play_sound(&active_pack, "activation", &card);
+                    })
+                    .await;
                     // 5. Trigger assistant turn with VAD
                     let _ = assistant_tx_clone.send(None).await;
                 }

@@ -166,7 +166,6 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/button/press", post(virtual_button_handler))
         // Ask / LLM query endpoints
         .route("/api/ask", post(post_ask_handler))
-        .route("/ask", get(get_ask_handler))
         // Chat History & Sessions
         .route(
             "/api/chats",
@@ -1562,21 +1561,6 @@ async fn post_ask_handler(
     handle_prompt(&state, &payload.prompt, payload.speak.unwrap_or(true), payload.session_id, true).await
 }
 
-#[derive(Deserialize)]
-struct AskQuery {
-    q: String,
-    #[serde(default)]
-    session_id: Option<String>,
-}
-
-async fn get_ask_handler(
-    State(state): State<AppState>,
-    Query(query): Query<AskQuery>,
-) -> impl IntoResponse {
-    // GET /ask is CSRF-safe & read-only (no speaker speech, no Home Assistant triggers)
-    handle_prompt(&state, &query.q, false, query.session_id, false).await
-}
-
 async fn handle_prompt(
     state: &AppState,
     prompt_text: &str,
@@ -1777,6 +1761,9 @@ async fn get_config_handler(State(state): State<AppState>) -> impl IntoResponse 
     }
     if !cfg.stt.deepgram_api_key.is_empty() {
         cfg.stt.deepgram_api_key = mask_key(&cfg.stt.deepgram_api_key);
+    }
+    if !cfg.stt.gemini_api_key.is_empty() {
+        cfg.stt.gemini_api_key = mask_key(&cfg.stt.gemini_api_key);
     }
     if !cfg.tts.openrouter.api_key.is_empty() {
         cfg.tts.openrouter.api_key = mask_key(&cfg.tts.openrouter.api_key);
@@ -2407,7 +2394,11 @@ fn is_masked(val: &str) -> bool {
 }
 
 fn mask_key(k: &str) -> String {
-    let chars: Vec<char> = k.chars().collect();
+    let trimmed = k.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let chars: Vec<char> = trimmed.chars().collect();
     if chars.len() > 8 {
         let prefix: String = chars[..4].iter().collect();
         let suffix: String = chars[chars.len() - 4..].iter().collect();
@@ -3338,17 +3329,24 @@ async fn connect_bluetooth_handler(
     State(state): State<AppState>,
     Json(payload): Json<BtDeviceActionPayload>,
 ) -> impl IntoResponse {
-    match state.network.connect_bluetooth(&payload.address) {
-        Ok(out) => {
+    let net = state.network.clone();
+    let addr = payload.address.clone();
+    let res = tokio::task::spawn_blocking(move || net.connect_bluetooth(&addr)).await;
+    match res {
+        Ok(Ok(out)) => {
             state.logs.push("INFO", &format!("Connected to Bluetooth device {}", payload.address)).await;
             (
                 StatusCode::OK,
                 Json(serde_json::json!({ "success": true, "output": out })),
             )
         }
-        Err(e) => (
+        Ok(Err(e)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": format!("Task failed: {}", e) })),
         ),
     }
 }
@@ -3357,17 +3355,24 @@ async fn disconnect_bluetooth_handler(
     State(state): State<AppState>,
     Json(payload): Json<BtDeviceActionPayload>,
 ) -> impl IntoResponse {
-    match state.network.disconnect_bluetooth(&payload.address) {
-        Ok(out) => {
+    let net = state.network.clone();
+    let addr = payload.address.clone();
+    let res = tokio::task::spawn_blocking(move || net.disconnect_bluetooth(&addr)).await;
+    match res {
+        Ok(Ok(out)) => {
             state.logs.push("INFO", &format!("Disconnected from Bluetooth device {}", payload.address)).await;
             (
                 StatusCode::OK,
                 Json(serde_json::json!({ "success": true, "output": out })),
             )
         }
-        Err(e) => (
+        Ok(Err(e)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": format!("Task failed: {}", e) })),
         ),
     }
 }
@@ -3376,8 +3381,11 @@ async fn pair_bluetooth_handler(
     State(state): State<AppState>,
     Json(payload): Json<BtDeviceActionPayload>,
 ) -> impl IntoResponse {
-    match state.network.pair_bluetooth(&payload.address) {
-        Ok(out) => {
+    let net = state.network.clone();
+    let addr = payload.address.clone();
+    let res = tokio::task::spawn_blocking(move || net.pair_bluetooth(&addr)).await;
+    match res {
+        Ok(Ok(out)) => {
             state
                 .logs
                 .push(
@@ -3390,9 +3398,13 @@ async fn pair_bluetooth_handler(
                 Json(serde_json::json!({ "success": true, "output": out })),
             )
         }
-        Err(e) => (
+        Ok(Err(e)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": format!("Task failed: {}", e) })),
         ),
     }
 }
@@ -3401,8 +3413,11 @@ async fn remove_bluetooth_handler(
     State(state): State<AppState>,
     Json(payload): Json<BtDeviceActionPayload>,
 ) -> impl IntoResponse {
-    match state.network.remove_bluetooth(&payload.address) {
-        Ok(out) => {
+    let net = state.network.clone();
+    let addr = payload.address.clone();
+    let res = tokio::task::spawn_blocking(move || net.remove_bluetooth(&addr)).await;
+    match res {
+        Ok(Ok(out)) => {
             state
                 .logs
                 .push(
@@ -3415,9 +3430,13 @@ async fn remove_bluetooth_handler(
                 Json(serde_json::json!({ "success": true, "output": out })),
             )
         }
-        Err(e) => (
+        Ok(Err(e)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "success": false, "error": e })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "error": format!("Task failed: {}", e) })),
         ),
     }
 }
@@ -3448,14 +3467,25 @@ async fn terminal_run_handler(
 
     state.logs.push("WARN", &format!("Terminal execution: '{}'", cmd)).await;
 
-    let out = std::process::Command::new("sh")
-        .args(["-c", cmd])
-        .output();
+    let res = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        tokio::process::Command::new("sh").args(["-c", cmd]).output(),
+    )
+    .await;
 
-    match out {
-        Ok(o) => {
-            let stdout = String::from_utf8_lossy(&o.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&o.stderr).to_string();
+    match res {
+        Ok(Ok(o)) => {
+            let mut stdout = String::from_utf8_lossy(&o.stdout).to_string();
+            let mut stderr = String::from_utf8_lossy(&o.stderr).to_string();
+            // Cap output to 64 KB to protect 238MB RAM
+            if stdout.len() > 65536 {
+                stdout.truncate(65536);
+                stdout.push_str("\n... [вывод обрезан до 64 КБ]");
+            }
+            if stderr.len() > 65536 {
+                stderr.truncate(65536);
+                stderr.push_str("\n... [вывод обрезан до 64 КБ]");
+            }
             Json(serde_json::json!({
                 "success": o.status.success(),
                 "exit_code": o.status.code().unwrap_or(-1),
@@ -3464,12 +3494,19 @@ async fn terminal_run_handler(
                 "output": if stdout.is_empty() { stderr } else { stdout },
             }))
         }
-        Err(e) => Json(serde_json::json!({
+        Ok(Err(e)) => Json(serde_json::json!({
             "success": false,
             "exit_code": -1,
             "stdout": "",
             "stderr": e.to_string(),
             "output": format!("Execution error: {}", e),
+        })),
+        Err(_) => Json(serde_json::json!({
+            "success": false,
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": "Command timed out after 15 seconds",
+            "output": "Command timed out after 15 seconds",
         })),
     }
 }
@@ -3964,7 +4001,7 @@ async fn post_streaming_config_handler(
 }
 
 async fn restart_streaming_handler(State(state): State<AppState>) -> impl IntoResponse {
-    state.streaming.sync_services().await;
+    state.streaming.restart_services().await;
     let status = state.streaming.get_status().await;
     Json(serde_json::json!({
         "success": true,
