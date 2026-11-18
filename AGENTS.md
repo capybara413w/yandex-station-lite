@@ -63,7 +63,8 @@ npm run build
 ```powershell
 tools\adb.exe connect 192.168.0.105:5555
 tools\adb.exe push station_daemon\target\aarch64-unknown-linux-musl\release\station_daemon /data/station_daemon
-tools\adb.exe push dist /data/station_web
+tools\adb.exe shell "rm -rf /data/station_web/*"
+tools\adb.exe push dist/. /data/station_web
 tools\adb.exe shell "chmod +x /data/station_daemon; killall -9 station_daemon; /sbin/start-stop-daemon -S -b -m -p /tmp/station_daemon.pid -x /data/station_daemon"
 ```
 
