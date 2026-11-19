@@ -86,18 +86,36 @@ def run_cmd(cmd_list, timeout=15):
 
 _connected_ips = set()
 
+def normalize_target(addr):
+    """Normalize target IP or host:port into standard (host, port, endpoint_string)."""
+    if not addr:
+        return "", 5555, ""
+    addr = str(addr).strip()
+    if ":" in addr:
+        parts = addr.rsplit(":", 1)
+        host = parts[0]
+        try:
+            port = int(parts[1])
+        except ValueError:
+            port = 5555
+        return host, port, f"{host}:{port}"
+    else:
+        return addr, 5555, f"{addr}:5555"
+
 def adb_connect(ip):
     if not ip:
         return
-    if ip not in _connected_ips:
-        run_cmd([ADB_BIN, "connect", f"{ip}:5555"], timeout=3)
-        _connected_ips.add(ip)
+    host, port, endpoint = normalize_target(ip)
+    if endpoint not in _connected_ips:
+        run_cmd([ADB_BIN, "connect", endpoint], timeout=4)
+        _connected_ips.add(endpoint)
 
 def adb_cmd(ip, args, timeout=20):
     cmd = [ADB_BIN]
     if ip:
         adb_connect(ip)
-        cmd.extend(["-s", f"{ip}:5555"])
+        _, _, endpoint = normalize_target(ip)
+        cmd.extend(["-s", endpoint])
     cmd.extend(args)
     return run_cmd(cmd, timeout=timeout)
 
@@ -105,26 +123,34 @@ def adb_shell(ip, shell_command, timeout=20):
     return adb_cmd(ip, ["shell", shell_command], timeout=timeout)
 
 def discover_speaker_ip():
-    """Finds active speaker via ADB or ARP network scan."""
-    # 1. Check already connected ADB devices
+    """Finds active speaker or KUYASE QEMU emulator via ADB or ARP network scan."""
+    # 1. Check already connected ADB devices (including non-standard ports like KUYASE 127.0.0.1:15555)
     code, out, _ = run_cmd([ADB_BIN, "devices"])
     if code == 0:
         for line in out.splitlines():
-            m = re.match(r"^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):5555\s+device", line.strip())
+            line = line.strip()
+            m = re.match(r"^([0-9a-zA-Z\.\-]+(?::\d+)?)\s+device", line)
             if m:
-                ip = m.group(1)
-                if not ip.startswith("127."):
-                    return ip
+                target = m.group(1)
+                # If target has standard 5555 port, strip it for cleaner display
+                if target.endswith(":5555"):
+                    return target[:-5]
+                return target
 
-    # 2. Probe known/common static leases
-    known_ips = ["192.168.0.104", "192.168.0.105"]
-    for kip in known_ips:
+    # 2. Probe known/common static leases and emulator endpoints
+    known_targets = [
+        ("192.168.0.105", 5555),
+        ("127.0.0.1", 15555),
+        ("127.0.0.1", 5555),
+        ("192.168.0.104", 5555),
+    ]
+    for host, port in known_targets:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.2)
-            if s.connect_ex((kip, 5555)) == 0:
+            s.settimeout(0.35)
+            if s.connect_ex((host, port)) == 0:
                 s.close()
-                return kip
+                return f"{host}:{port}" if port != 5555 else host
             s.close()
         except Exception:
             pass
@@ -157,7 +183,7 @@ def discover_speaker_ip():
     except Exception:
         pass
 
-    return "192.168.0.104"
+    return "192.168.0.105"
 
 def check_speaker_dependencies(ip):
     """Checks all system, audio, storage, memory, spotter and security dependencies on the speaker."""
@@ -407,9 +433,10 @@ def diagnose_speaker(ip):
     }
 
     # Connect ADB
-    run_cmd([ADB_BIN, "connect", f"{ip}:5555"], timeout=4)
+    adb_connect(ip)
     code, out, _ = run_cmd([ADB_BIN, "devices"])
-    if f"{ip}:5555\tdevice" in out or f"{ip}:5555 device" in out:
+    _, _, endpoint = normalize_target(ip)
+    if f"{endpoint}\tdevice" in out or f"{endpoint} device" in out:
         info["adb_connected"] = True
     else:
         return info
@@ -419,11 +446,11 @@ def diagnose_speaker(ip):
     if code == 0:
         if "uid=0(root)" in out:
             info["root"] = True
-        lines = out.splitlines()
+        lines = [l.strip() for l in out.splitlines() if l.strip()]
         if len(lines) >= 2:
-            info["kernel"] = lines[1].strip()
+            info["kernel"] = lines[1]
         if len(lines) >= 3:
-            info["uptime"] = lines[2].strip()
+            info["uptime"] = lines[2]
 
     # Check processes
     code, out, _ = adb_shell(ip, "ps")
@@ -627,7 +654,7 @@ def install_station_daemon(ip, mode="daemon", log_fn=print):
     dist_dir = os.path.join(SCRIPT_DIR, "dist")
     if os.path.exists(dist_dir):
         log_fn("  -> Загрузка актуальной веб-панели управления (/data/station_web)...")
-        adb_shell(ip, "mkdir -p /data/station_web /data/station_web/fonts")
+        adb_shell(ip, "rm -rf /data/station_web/*; mkdir -p /data/station_web /data/station_web/fonts")
         adb_cmd(ip, ["push", os.path.join(dist_dir, "."), "/data/station_web/"])
 
     font_src = os.path.join(SCRIPT_DIR, "tools", "fonts", "material-symbols-rounded.woff2")
@@ -689,7 +716,7 @@ def install_station_daemon(ip, mode="daemon", log_fn=print):
 # ==============================================================================
 
 class WebInstallerHandler(BaseHTTPRequestHandler):
-    target_ip = "192.168.0.104"
+    target_ip = discover_speaker_ip()
     logs = []
 
     @classmethod
@@ -845,7 +872,9 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
         self.send_error(404, "Not Found")
 
     def render_html(self):
-        return """<!DOCTYPE html>
+        cur_target = WebInstallerHandler.target_ip or discover_speaker_ip()
+        host = cur_target.split(":")[0] if ":" in cur_target else cur_target
+        html = """<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
@@ -2123,7 +2152,8 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ip})
       });
-      document.getElementById('btnWebPanel').href = `http://${ip}:5000`;
+      const host = ip.includes(':') ? ip.split(':')[0] : ip;
+      document.getElementById('btnWebPanel').href = `http://${host}:5000`;
       checkStatus();
       checkDependencies();
     }
@@ -2134,7 +2164,8 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
         const data = await res.json();
         if (data.ip) {
           document.getElementById('targetIp').value = data.ip;
-          document.getElementById('btnWebPanel').href = `http://${data.ip}:5000`;
+          const host = data.ip.includes(':') ? data.ip.split(':')[0] : data.ip;
+          document.getElementById('btnWebPanel').href = `http://${host}:5000`;
           checkStatus();
           checkDependencies();
         }
@@ -2194,6 +2225,7 @@ class WebInstallerHandler(BaseHTTPRequestHandler):
   </script>
 </body>
 </html>"""
+        return html.replace('http://192.168.0.104:5000', f'http://{host}:5000').replace('value="192.168.0.104"', f'value="{cur_target}"')
 
 def start_web_server(port=8080):
     server = HTTPServer(("0.0.0.0", port), WebInstallerHandler)
@@ -2303,8 +2335,9 @@ def run_tui():
             start_web_server(8080)
 
         elif choice == "7":
-            print(f"Подключение Shell к {target_ip}:5555 (для выхода введите exit)...")
-            subprocess.run([ADB_BIN, "-s", f"{target_ip}:5555", "shell"])
+            _, _, endpoint = normalize_target(target_ip)
+            print(f"Подключение Shell к {endpoint} (для выхода введите exit)...")
+            subprocess.run([ADB_BIN, "-s", endpoint, "shell"])
 
         elif choice == "8":
             new_ip = input("Введите новый IP адрес: ").strip()

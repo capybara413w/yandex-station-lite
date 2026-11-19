@@ -15,13 +15,17 @@ echo [0/5] Проверка подключенных ADB устройств...
 %ADB_BIN% devices
 echo.
 
-set DEFAULT_IP=192.168.0.106
+set DEFAULT_IP=192.168.0.105
 set /p STATION_IP="Введите IP-адрес станции (Enter для %DEFAULT_IP%): "
 if "%STATION_IP%"=="" (
     set STATION_IP=%DEFAULT_IP%
 )
 
-set STATION_ADDR=%STATION_IP%:5555
+set STATION_ADDR=%STATION_IP%
+echo %STATION_IP% | findstr /C:":" >nul
+if errorlevel 1 (
+    set STATION_ADDR=%STATION_IP%:5555
+)
 
 echo.
 echo [1/5] Подключение к станции %STATION_ADDR%...
@@ -62,6 +66,21 @@ echo [3/5] Отправка скриптов управления и kill_and_wi
 for %%f in (station\*.sh) do (
     echo   -> %%~nxf
     %ADB_BIN% -s %STATION_ADDR% push "%%f" /data/%%~nxf
+)
+
+echo.
+echo [3b/5] Отправка веб-панели управления в /data/station_web...
+%ADB_BIN% -s %STATION_ADDR% shell "rm -rf /data/station_web/*; mkdir -p /data/station_web /data/station_web/fonts"
+if exist "dist" (
+    %ADB_BIN% -s %STATION_ADDR% push "dist\." /data/station_web
+)
+if exist "tools\fonts\material-symbols-rounded.woff2" (
+    %ADB_BIN% -s %STATION_ADDR% push "tools\fonts\material-symbols-rounded.woff2" /data/station_web/fonts/material-symbols-rounded.woff2
+)
+if exist "tools\yandex_spotter" (
+    echo   -> yandex_spotter
+    %ADB_BIN% -s %STATION_ADDR% push "tools\yandex_spotter" /data/yandex_spotter
+    %ADB_BIN% -s %STATION_ADDR% shell "chmod +x /data/yandex_spotter"
 )
 
 echo.
