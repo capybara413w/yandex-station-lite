@@ -224,6 +224,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'home' | 'music' | 'assistant' | 'clock' | 'hass' | 'led' | 'terminal' | 'settings' | 'guide'>('home');
   const [isBoykisserModalOpen, setIsBoykisserModalOpen] = useState(false);
 
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [activeTab]);
+
   const [config, setConfig] = useState<Config>({});
   const [playerStatus, setPlayerStatus] = useState<PlayerStatus>({
     state: 'stopped',
@@ -1348,8 +1352,19 @@ export default function App() {
       const res = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q, speak: false })
+        body: JSON.stringify({ prompt: q, query: q, speak: false })
       });
+      if (!res.ok) {
+        let errText = '';
+        try {
+          const errJson = await res.json();
+          errText = errJson.error || errJson.message || JSON.stringify(errJson);
+        } catch {
+          errText = await res.text();
+        }
+        setResponsePreview(`Ошибка (${res.status}): ${errText}`);
+        return;
+      }
       const data = await res.json();
       setResponsePreview(data.text || '(пустой ответ)');
       if (Array.isArray(data.color) && data.color.length === 3) {
@@ -1691,7 +1706,13 @@ export default function App() {
     }
   };
 
-  const stationDisplayIp = config.station_ip || config.detected_station_ip || '192.168.1.50';
+  const stationDisplayIp =
+    playerStatus.station_ip ||
+    config.station_ip ||
+    config.detected_station_ip ||
+    (typeof window !== 'undefined' && window.location.hostname && window.location.hostname !== 'localhost'
+      ? window.location.hostname
+      : '192.168.0.105');
 
   const formatSeconds = (sec: number) => {
     const m = Math.floor(sec / 60);
@@ -1859,7 +1880,7 @@ export default function App() {
           <div className="m3-title-group">
             <h1>Furry station v0.1</h1>
             <div className="m3-subtitle">
-              *station model* • Yandex Station Lite ({stationDisplayIp}) • {playerStatus.state.toUpperCase()}
+              Amlogic A113X • Yandex Station Lite ({stationDisplayIp}) • {playerStatus.state.toUpperCase()}
             </div>
           </div>
 

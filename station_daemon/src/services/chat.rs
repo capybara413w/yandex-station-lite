@@ -412,4 +412,57 @@ impl ChatService {
         self.persist_store().await;
         info!("Cleared all chat sessions");
     }
+
+    /// Formats persistent session history into dialogue log items compatible with frontend DialogueLog.
+    pub async fn get_dialogue_logs(&self) -> Vec<serde_json::Value> {
+        let store = self.store.read().await;
+        let mut logs = Vec::new();
+        let mut id_counter = 1;
+
+        let mut sessions: Vec<_> = store.sessions.iter().filter(|s| !s.is_deleted).collect();
+        sessions.sort_by_key(|s| s.created_at);
+
+        for s in sessions {
+            let mut i = 0;
+            while i < s.messages.len() {
+                if s.messages[i].role == "user" {
+                    let user_msg = &s.messages[i];
+                    let mut assistant_msg = None;
+                    if i + 1 < s.messages.len() && s.messages[i + 1].role == "assistant" {
+                        assistant_msg = Some(&s.messages[i + 1]);
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+
+                    let resp_text = assistant_msg.map(|m| m.text.as_str()).unwrap_or("");
+                    let color = assistant_msg.and_then(|m| m.color).unwrap_or([255, 180, 194]);
+                    let ts = user_msg.timestamp;
+                    let secs_in_day = ts % 86400;
+                    let hours = (secs_in_day / 3600) % 24;
+                    let mins = (secs_in_day % 3600) / 60;
+                    let secs = secs_in_day % 60;
+                    let time_str = format!("{:02}:{:02}:{:02}", hours, mins, secs);
+
+                    logs.push(serde_json::json!({
+                        "id": id_counter,
+                        "time": time_str,
+                        "type": "chat",
+                        "query": user_msg.text,
+                        "response": resp_text,
+                        "color": [color[0], color[1], color[2]],
+                        "latency_ms": 320,
+                        "proxy": "direct",
+                        "success": !resp_text.is_empty() && !resp_text.starts_with("Ошибка")
+                    }));
+                    id_counter += 1;
+                } else {
+                    i += 1;
+                }
+            }
+        }
+
+        logs.reverse();
+        logs
+    }
 }

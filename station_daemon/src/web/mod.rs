@@ -157,6 +157,7 @@ pub fn create_router(state: AppState) -> Router {
         )
         // LED Ring controls
         .route("/api/led", post(set_led_handler))
+        .route("/api/led/color", post(set_led_handler))
         // TTS Speech
         .route("/api/tts/speak", post(post_speak_handler))
         // STT & Microphone
@@ -166,6 +167,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/button/press", post(virtual_button_handler))
         // Ask / LLM query endpoints
         .route("/api/ask", post(post_ask_handler))
+        .route("/api/dialogue_logs", get(get_dialogue_logs_handler))
         // Chat History & Sessions
         .route(
             "/api/chats",
@@ -835,19 +837,30 @@ async fn music_search_handler(
 
     match source.to_lowercase().as_str() {
         "ytmusic" | "youtube" | "yt" => {
-            match state.ytmusic.search(q, limit).await {
-                Ok(tracks) => Json(serde_json::json!({
+            let res = tokio::time::timeout(std::time::Duration::from_secs(4), state.ytmusic.search(q, limit)).await;
+            match res {
+                Ok(Ok(tracks)) => Json(serde_json::json!({
                     "success": true,
                     "query": q,
                     "source": "ytmusic",
                     "results": tracks,
                 }))
                 .into_response(),
-                Err(e) => {
+                Ok(Err(e)) => {
                     warn!("YT Music search for '{}' failed: {}", q, e);
                     Json(serde_json::json!({
                         "success": false,
                         "error": e,
+                        "source": "ytmusic",
+                        "results": [],
+                    }))
+                    .into_response()
+                }
+                Err(_) => {
+                    warn!("YT Music search for '{}' timed out after 4s", q);
+                    Json(serde_json::json!({
+                        "success": false,
+                        "error": "Таймаут поиска YT Music",
                         "source": "ytmusic",
                         "results": [],
                     }))
@@ -900,7 +913,13 @@ async fn music_search_handler(
         _ => {
             let yt_limit = (limit + 1) / 2;
             let sc_limit = limit / 2;
-            let yt_tracks = state.ytmusic.search(q, yt_limit).await.unwrap_or_default();
+            let yt_tracks = tokio::time::timeout(std::time::Duration::from_secs(4), state.ytmusic.search(q, yt_limit))
+                .await
+                .unwrap_or_else(|_| {
+                    warn!("YT Music search timed out in combined search");
+                    Ok(Vec::new())
+                })
+                .unwrap_or_default();
             let sc_tracks = state.soundcloud.search_tracks(q, sc_limit).await.unwrap_or_default();
 
             let mut combined = Vec::new();
@@ -1375,8 +1394,9 @@ async fn ytmusic_search_handler(
             .into_response();
     }
     let limit = params.limit.unwrap_or(20);
-    match state.ytmusic.search(q, limit).await {
-        Ok(tracks) => (
+    let res = tokio::time::timeout(std::time::Duration::from_secs(4), state.ytmusic.search(q, limit)).await;
+    match res {
+        Ok(Ok(tracks)) => (
             StatusCode::OK,
             Json(serde_json::json!({
                 "success": true,
@@ -1386,13 +1406,26 @@ async fn ytmusic_search_handler(
             })),
         )
             .into_response(),
-        Err(e) => {
+        Ok(Err(e)) => {
             warn!("YT Music search for '{}' failed: {}", q, e);
             (
-                StatusCode::INTERNAL_SERVER_ERROR,
+                StatusCode::OK,
                 Json(serde_json::json!({
                     "success": false,
                     "error": e,
+                    "source": "ytmusic",
+                    "results": [],
+                })),
+            )
+                .into_response()
+        }
+        Err(_) => {
+            warn!("YT Music search for '{}' timed out after 4s", q);
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": "Таймаут YT Music",
                     "source": "ytmusic",
                     "results": [],
                 })),
@@ -1567,6 +1600,7 @@ async fn virtual_button_handler(
 
 #[derive(Deserialize)]
 struct AskRequest {
+    #[serde(alias = "query", alias = "q")]
     prompt: String,
     #[serde(default)]
     speak: Option<bool>,
@@ -3708,6 +3742,11 @@ async fn post_dualboot_mode_handler(
 // Chat History & Multi-turn Session Handlers
 // ---------------------------------------------------------------------------
 
+async fn get_dialogue_logs_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let logs = state.chat.get_dialogue_logs().await;
+    Json(logs)
+}
+
 async fn get_chats_handler(State(state): State<AppState>) -> impl IntoResponse {
     let list = state.chat.list_sessions().await;
     Json(serde_json::json!({
@@ -3780,8 +3819,8 @@ async fn get_hass_status_handler(State(state): State<AppState>) -> impl IntoResp
             Json(serde_json::json!({ "status": "ok", "data": res })),
         ),
         Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "status": "error", "error": e })),
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "ok", "data": { "connected": false, "error": e } })),
         ),
     }
 }
@@ -3792,9 +3831,9 @@ async fn get_hass_entities_handler(State(state): State<AppState>) -> impl IntoRe
             StatusCode::OK,
             Json(serde_json::json!({ "status": "ok", "entities": entities })),
         ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "status": "error", "error": e })),
+        Err(_e) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "ok", "entities": [] })),
         ),
     }
 }
