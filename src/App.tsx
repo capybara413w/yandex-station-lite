@@ -364,6 +364,7 @@ export default function App() {
   const [ytPlaylists, setYtPlaylists] = useState<any[]>([]);
   const [selectedYtPlaylist, setSelectedYtPlaylist] = useState<any | null>(null);
   const [ytPlaylistTracks, setYtPlaylistTracks] = useState<any[]>([]);
+  const [playlistSearchFilter, setPlaylistSearchFilter] = useState('');
   const [ytLoading, setYtLoading] = useState(false);
   const [isYtCookieModalOpen, setIsYtCookieModalOpen] = useState(false);
   const [ytCookieInput, setYtCookieInput] = useState('');
@@ -807,42 +808,60 @@ export default function App() {
         const data = await res.json();
         setConfig(data);
         if (data.llm_provider) setLlmProviderInput(data.llm_provider);
+        if (data.openrouter_api_key) setOpenrouterKeyInput(data.openrouter_api_key);
         if (data.openrouter_model) setOpenrouterModelInput(data.openrouter_model);
+        if (data.groq_api_key) setGroqKeyInput(data.groq_api_key);
         if (data.groq_model) setGroqModelInput(data.groq_model);
+        if (data.openai_api_key) setOpenaiKeyInput(data.openai_api_key);
         if (data.openai_model) setOpenaiModelInput(data.openai_model);
+        if (data.mistral_api_key) setMistralKeyInput(data.mistral_api_key);
         if (data.mistral_model) setMistralModelInput(data.mistral_model);
+        if (data.anthropic_api_key) setAnthropicKeyInput(data.anthropic_api_key);
         if (data.anthropic_model) setAnthropicModelInput(data.anthropic_model);
+        if (data.gemini_api_key) setGeminiKeyInput(data.gemini_api_key);
         if (data.gemini_model) setGeminiModelInput(data.gemini_model);
+        if (data.perplexity_api_key) setPerplexityKeyInput(data.perplexity_api_key);
         if (data.perplexity_model) setPerplexityModelInput(data.perplexity_model);
+        if (data.together_api_key) setTogetherKeyInput(data.together_api_key);
         if (data.together_model) setTogetherModelInput(data.together_model);
         if (data.custom_llm_base_url) setCustomLlmBaseUrlInput(data.custom_llm_base_url);
         if (data.custom_llm_model) setCustomLlmModelInput(data.custom_llm_model);
+        if (data.deepseek_api_key) setDeepseekKeyInput(data.deepseek_api_key);
         if (data.deepseek_model) setDeepseekModelInput(data.deepseek_model);
         if (data.system_prompt) setSystemPromptInput(data.system_prompt);
 
         if (data.stt_provider) setSttProviderInput(data.stt_provider);
+        if (data.openrouter_stt_api_key) setOpenrouterSttKeyInput(data.openrouter_stt_api_key);
         if (data.openrouter_stt_model) setOpenrouterSttModelInput(data.openrouter_stt_model);
         if (data.cloudflare_account_id) setCfSttAccountInput(data.cloudflare_account_id);
+        if (data.cloudflare_api_key) setCfSttKeyInput(data.cloudflare_api_key);
         if (data.stt_model) setCfSttModelInput(data.stt_model);
+        if (data.openai_stt_api_key) setOpenaiSttKeyInput(data.openai_stt_api_key);
         if (data.openai_stt_model) setOpenaiSttModelInput(data.openai_stt_model);
+        if (data.groq_stt_api_key) setGroqSttKeyInput(data.groq_stt_api_key);
         if (data.groq_stt_model) setGroqSttModelInput(data.groq_stt_model);
+        if (data.deepgram_stt_api_key) setDeepgramSttKeyInput(data.deepgram_stt_api_key);
         if (data.deepgram_stt_model) setDeepgramSttModelInput(data.deepgram_stt_model);
         if (data.custom_stt_url) setCustomSttUrlInput(data.custom_stt_url);
 
         if (data.tts_provider) setTtsProviderInput(data.tts_provider);
+        if (data.openrouter_tts_api_key) setOpenrouterTtsKeyInput(data.openrouter_tts_api_key);
         if (data.openrouter_tts_model) setOpenrouterTtsModelInput(data.openrouter_tts_model);
         if (data.openrouter_tts_voice) setOpenrouterTtsVoiceInput(data.openrouter_tts_voice);
+        if (data.elevenlabs_api_key) setElevenKeyInput(data.elevenlabs_api_key);
         if (data.elevenlabs_model_id) setElevenModelInput(data.elevenlabs_model_id);
         if (data.elevenlabs_voice_id) {
           setElevenVoiceIdInput(data.elevenlabs_voice_id);
           setElevenVoicePreset(data.elevenlabs_voice_id);
         }
         if (data.cloudflare_tts_account_id) setCfTtsAccountInput(data.cloudflare_tts_account_id);
+        if (data.cloudflare_tts_api_token) setCfTtsTokenInput(data.cloudflare_tts_api_token);
         if (data.cloudflare_tts_model) setCfTtsModelInput(data.cloudflare_tts_model);
         if (data.cloudflare_tts_voice_id) {
           setCfTtsVoiceIdInput(data.cloudflare_tts_voice_id);
           setCfTtsVoicePreset(data.cloudflare_tts_voice_id);
         }
+        if (data.openai_tts_api_key) setOpenaiTtsKeyInput(data.openai_tts_api_key);
         if (data.cloudflare_tts_extra_payload) {
           setCfTtsExtraInput(JSON.stringify(data.cloudflare_tts_extra_payload, null, 2));
         }
@@ -2408,7 +2427,7 @@ export default function App() {
         {activeTab === 'music' && (
           <div className="m3-tab-view" style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
             {/* 1. Main Full Hero Player */}
-            <div className="m3-surface-card" style={{ background: '#1d1b22', border: 'none' }}>
+            <div className="m3-surface-card" style={{ background: '#1d1b22', border: 'none', padding: '24px' }}>
               <div style={{ display: 'flex', gap: '28px', alignItems: 'center', flexWrap: 'wrap' }}>
                 {/* Vinyl / Cover Art Box */}
                 <div
@@ -2424,6 +2443,7 @@ export default function App() {
                     flexDirection: 'column',
                     position: 'relative',
                     overflow: 'hidden',
+                    flexShrink: 0,
                   }}
                 >
                   <img
@@ -2442,11 +2462,11 @@ export default function App() {
                   </span>
                 </div>
 
-                {/* Track Details & Scrubber */}
-                <div style={{ flex: 1, minWidth: '280px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                {/* Track Details & Playback Controls */}
+                <div style={{ flex: 1, minWidth: '280px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
                     <div>
-                      <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#ffb4c2', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#ffb4c2', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                         АКТИВНЫЙ ТРЕК НА СТАНЦИИ
                       </div>
                       <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#fff', margin: '4px 0 2px' }}>
@@ -2456,80 +2476,16 @@ export default function App() {
                         {playerStatus.artist || 'SoundCloud Stream • Yandex Station Lite'}
                       </div>
                     </div>
-                    <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#ffb4c2', background: 'rgba(255, 180, 194, 0.12)', padding: '4px 12px', borderRadius: '12px' }}>
-                      {playerStatus.volume}% ГРОМКОСТЬ
-                    </span>
-                  </div>
 
-                  {/* Scrubber Progress Bar */}
-                  <div style={{ marginTop: '16px' }}>
-                    <input
-                      type="range"
-                      min={0}
-                      max={playerStatus.duration_secs || 100}
-                      value={progressSlider}
-                      onChange={(e) => setProgressSlider(Number(e.target.value))}
-                      onMouseUp={() => handleSeek(progressSlider)}
-                      className="m3-slider"
-                    />
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: '#a49ea8', marginTop: '4px', fontWeight: 600 }}>
-                      <span>{formatSeconds(progressSlider)}</span>
-                      <span>{formatSeconds(playerStatus.duration_secs || 0)}</span>
-                    </div>
-                  </div>
-
-                  {/* Playback Button Controls */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '14px', flexWrap: 'wrap', gap: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    {/* Volume Slider Knob (Secondary & Compact) */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#25202c', padding: '6px 14px', borderRadius: '12px' }}>
                       <button
                         type="button"
-                        className="m3-btn m3-btn-tonal"
-                        onClick={() => handleSeek(Math.max(0, progressSlider - 15))}
-                        title="Назад 15 сек"
-                      >
-                        <span className="material-symbols-rounded">replay_10</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="m3-btn m3-btn-primary"
-                        style={{ padding: '10px 24px', fontSize: '0.95rem' }}
-                        onClick={() => handlePlayerAction(playerStatus.state === 'playing' ? 'pause' : 'resume')}
-                      >
-                        <span className="material-symbols-rounded" style={{ fontSize: '24px' }}>
-                          {playerStatus.state === 'playing' ? 'pause' : 'play_arrow'}
-                        </span>
-                        <span>{playerStatus.state === 'playing' ? 'Пауза' : 'Воспроизведение'}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="m3-btn m3-btn-tonal"
-                        onClick={() => handleSeek(progressSlider + 15)}
-                        title="Вперед 15 сек"
-                      >
-                        <span className="material-symbols-rounded">forward_10</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="m3-btn m3-btn-outlined"
-                        onClick={() => handlePlayerAction('stop')}
-                        title="Остановить"
-                      >
-                        <span className="material-symbols-rounded">stop</span>
-                        <span>Стоп</span>
-                      </button>
-                    </div>
-
-                    {/* Volume Slider Knob */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: '160px' }}>
-                      <button
-                        type="button"
-                        style={{ background: 'transparent', border: 'none', color: '#ffb4c2', cursor: 'pointer', display: 'flex' }}
+                        style={{ background: 'transparent', border: 'none', color: '#ffb4c2', cursor: 'pointer', display: 'flex', padding: 0 }}
                         onClick={() => sendVolumeChange(volumeSlider === 0 ? 70 : 0)}
+                        title="Вкл/Выкл звук"
                       >
-                        <span className="material-symbols-rounded">
+                        <span className="material-symbols-rounded" style={{ fontSize: '20px' }}>
                           {volumeSlider === 0 ? 'volume_off' : volumeSlider < 40 ? 'volume_down' : 'volume_up'}
                         </span>
                       </button>
@@ -2543,10 +2499,131 @@ export default function App() {
                           setVolumeSlider(Number(e.target.value));
                         }}
                         onMouseUp={() => sendVolumeChange(volumeSlider)}
-                        className="m3-slider"
+                        className="m3-volume-slider"
+                        aria-label="Громкость"
                       />
+                      <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#ffb4c2', minWidth: '38px', textAlign: 'right' }}>
+                        {playerStatus.volume}%
+                      </span>
                     </div>
                   </div>
+
+                  {/* Playback Button Controls */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="m3-btn m3-btn-tonal"
+                      onClick={() => handleSeek(Math.max(0, progressSlider - 15))}
+                      title="Назад 15 сек"
+                    >
+                      <span className="material-symbols-rounded">replay_10</span>
+                      <span>-15с</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="m3-btn m3-btn-primary"
+                      style={{ padding: '10px 26px', fontSize: '0.95rem' }}
+                      onClick={() => handlePlayerAction(playerStatus.state === 'playing' ? 'pause' : 'resume')}
+                    >
+                      <span className="material-symbols-rounded" style={{ fontSize: '24px' }}>
+                        {playerStatus.state === 'playing' ? 'pause' : 'play_arrow'}
+                      </span>
+                      <span>{playerStatus.state === 'playing' ? 'Пауза' : 'Воспроизведение'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="m3-btn m3-btn-tonal"
+                      onClick={() => handleSeek(progressSlider + 15)}
+                      title="Вперед 15 сек"
+                    >
+                      <span>+15с</span>
+                      <span className="material-symbols-rounded">forward_10</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="m3-btn m3-btn-outlined"
+                      onClick={() => handlePlayerAction('stop')}
+                      title="Остановить"
+                    >
+                      <span className="material-symbols-rounded">stop</span>
+                      <span>Стоп</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* DEDICATED FULL-WIDTH MUSIC SCRUBBER (POINT 1) */}
+              <div className="m3-music-scrubber-card">
+                <div className="m3-music-scrubber-header">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="material-symbols-rounded" style={{ color: '#ffb4c2', fontSize: '20px' }}>graphic_eq</span>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#ffb4c2', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                      ПРОГРЕСС ВОСПРОИЗВЕДЕНИЯ
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="m3-music-scrubber-time-badge">
+                      {formatSeconds(progressSlider)}
+                    </span>
+                    <span style={{ color: '#79737f', fontSize: '0.9rem', fontWeight: 700 }}>/</span>
+                    <span className="m3-music-scrubber-time-badge" style={{ background: '#1e1a24', color: '#c7c2c9' }}>
+                      {formatSeconds(playerStatus.duration_secs || 0)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Massive Full-Width Scrubber Track */}
+                <input
+                  type="range"
+                  min={0}
+                  max={playerStatus.duration_secs || 100}
+                  value={progressSlider}
+                  onChange={(e) => setProgressSlider(Number(e.target.value))}
+                  onMouseUp={() => handleSeek(progressSlider)}
+                  className="m3-music-scrubber"
+                  aria-label="Перемотка трека"
+                />
+
+                {/* Quick Navigation Seek Jump Buttons */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginTop: '4px' }}>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      style={{ background: '#25202c', border: 'none', color: '#ffb4c2', fontSize: '0.76rem', fontWeight: 700, padding: '4px 10px', borderRadius: '8px', cursor: 'pointer' }}
+                      onClick={() => handleSeek(0)}
+                    >
+                      ⏮ С начала
+                    </button>
+                    <button
+                      type="button"
+                      style={{ background: '#25202c', border: 'none', color: '#c7c2c9', fontSize: '0.76rem', fontWeight: 700, padding: '4px 10px', borderRadius: '8px', cursor: 'pointer' }}
+                      onClick={() => handleSeek(Math.max(0, progressSlider - 30))}
+                    >
+                      -30 сек
+                    </button>
+                    <button
+                      type="button"
+                      style={{ background: '#25202c', border: 'none', color: '#c7c2c9', fontSize: '0.76rem', fontWeight: 700, padding: '4px 10px', borderRadius: '8px', cursor: 'pointer' }}
+                      onClick={() => handleSeek(Math.min(playerStatus.duration_secs || 100, progressSlider + 30))}
+                    >
+                      +30 сек
+                    </button>
+                    {playerStatus.duration_secs ? (
+                      <button
+                        type="button"
+                        style={{ background: '#25202c', border: 'none', color: '#c7c2c9', fontSize: '0.76rem', fontWeight: 700, padding: '4px 10px', borderRadius: '8px', cursor: 'pointer' }}
+                        onClick={() => handleSeek(Math.floor(playerStatus.duration_secs / 2))}
+                      >
+                        50% (середина)
+                      </button>
+                    ) : null}
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: '#79737f', fontWeight: 600 }}>
+                    {playerStatus.duration_secs ? `${Math.round((progressSlider / playerStatus.duration_secs) * 100)}% сыграно` : 'Потоковое аудио'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -2746,66 +2823,66 @@ export default function App() {
                 ))}
               </div>
 
-              {/* Instant Search Results */}
+              {/* Instant Search Results (Point 2: Clean M3 Track Rows) */}
               {scResults.length > 0 && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '12px', marginTop: '6px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
                   {scResults.map((t, idx) => {
                     const src = t.source || 'ytmusic';
+                    const isPlayingThis = playerStatus.track && t.title && playerStatus.track.toLowerCase().includes(t.title.toLowerCase().slice(0, 15));
                     return (
                       <div
                         key={idx}
-                        style={{
-                          background: '#18161c',
-                          border: 'none',
-                          borderRadius: '16px',
-                          padding: '12px 14px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: '12px',
+                        className={`m3-track-row ${isPlayingThis ? 'is-active-track' : ''}`}
+                        onClick={() => {
+                          if (t.source === 'ytmusic' && t.id) {
+                            handlePlayYtTrack(t);
+                          } else {
+                            const target = (t.source === 'radio' && (t.stream_url || t.url)) 
+                              ? (t.stream_url || t.url) 
+                              : `${t.title} ${t.artist || ''}`.trim();
+                            handlePlaySong(target);
+                          }
                         }}
+                        title="Нажмите, чтобы включить"
                       >
+                        <div className="m3-track-index">
+                          {isPlayingThis ? (
+                            <span className="material-symbols-rounded" style={{ color: '#ffb4c2', fontSize: '20px' }}>graphic_eq</span>
+                          ) : (
+                            <span>{idx + 1}</span>
+                          )}
+                        </div>
+
                         {/* Thumbnail Artwork */}
                         {t.artwork_url ? (
                           <img
                             src={t.artwork_url}
                             alt=""
-                            style={{ width: '48px', height: '48px', borderRadius: '12px', objectFit: 'cover', flexShrink: 0 }}
+                            className="m3-track-cover"
                           />
                         ) : (
-                          <div
-                            style={{
-                              width: '48px',
-                              height: '48px',
-                              borderRadius: '12px',
-                              background: '#282430',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              flexShrink: 0,
-                            }}
-                          >
+                          <div className="m3-track-cover">
                             <span className="material-symbols-rounded" style={{ color: '#ffb4c2', fontSize: '22px' }}>
                               {src === 'radio' ? 'radio' : src === 'ytmusic' ? 'smart_display' : 'music_note'}
                             </span>
                           </div>
                         )}
 
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
+                        <div className="m3-track-info">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <span
                               style={{
-                                fontSize: '0.66rem',
+                                fontSize: '0.65rem',
                                 fontWeight: 800,
                                 textTransform: 'uppercase',
                                 padding: '2px 6px',
                                 borderRadius: '6px',
                                 background:
                                   src === 'ytmusic'
-                                    ? 'rgba(255, 60, 90, 0.16)'
+                                    ? 'rgba(255, 60, 90, 0.2)'
                                     : src === 'soundcloud'
-                                    ? 'rgba(255, 140, 0, 0.16)'
-                                    : 'rgba(0, 229, 255, 0.16)',
+                                    ? 'rgba(255, 140, 0, 0.2)'
+                                    : 'rgba(0, 229, 255, 0.2)',
                                 color:
                                   src === 'ytmusic'
                                     ? '#ff8598'
@@ -2816,20 +2893,24 @@ export default function App() {
                             >
                               {src === 'ytmusic' ? 'YT Music' : src === 'soundcloud' ? 'SoundCloud' : 'Радио'}
                             </span>
+                            <span className="m3-track-title">{t.title || t.name}</span>
                           </div>
-                          <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {t.title || t.name}
-                          </div>
-                          <div style={{ fontSize: '0.75rem', color: '#9d96a2', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {t.artist || t.user?.username || (src === 'ytmusic' ? 'YouTube Music' : 'SoundCloud')}
+                          <div className="m3-track-subtitle">
+                            <span>{t.artist || t.user?.username || (src === 'ytmusic' ? 'YouTube Music' : 'SoundCloud')}</span>
                           </div>
                         </div>
 
+                        {t.duration_seconds ? (
+                          <div className="m3-track-duration">
+                            {formatSeconds(t.duration_seconds)}
+                          </div>
+                        ) : null}
+
                         <button
                           type="button"
-                          className="m3-btn m3-btn-primary"
-                          style={{ padding: '6px 14px', fontSize: '0.78rem' }}
-                          onClick={() => {
+                          className="m3-track-action-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
                             if (t.source === 'ytmusic' && t.id) {
                               handlePlayYtTrack(t);
                             } else {
@@ -2839,9 +2920,11 @@ export default function App() {
                               handlePlaySong(target);
                             }
                           }}
+                          title="Воспроизвести"
                         >
-                          <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>play_arrow</span>
-                          <span>Play</span>
+                          <span className="material-symbols-rounded" style={{ fontSize: '20px' }}>
+                            {isPlayingThis && playerStatus.state === 'playing' ? 'pause' : 'play_arrow'}
+                          </span>
                         </button>
                       </div>
                     );
@@ -2940,119 +3023,226 @@ export default function App() {
               </div>
             )}
 
-            {/* ----------------- SUBTAB: LIKED SONGS ----------------- */}
+            {/* ----------------- SUBTAB: LIKED SONGS (Point 2) ----------------- */}
             {ytSubTab === 'liked' && (
-              <div className="m3-surface-card">
+              <div className="m3-surface-card" style={{ padding: '24px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                   <div className="m3-card-title">
                     <span className="material-symbols-rounded" style={{ color: '#e91e63' }}>favorite</span>
                     <span>Понравившиеся треки ({ytLikedSongs.length})</span>
                   </div>
-                  <button type="button" className="m3-btn m3-btn-tonal" onClick={fetchYtLiked} disabled={ytLoading}>
-                    <span className="material-symbols-rounded">refresh</span>
-                    <span>Обновить</span>
-                  </button>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    {ytLikedSongs.length > 0 && (
+                      <button
+                        type="button"
+                        className="m3-btn m3-btn-primary"
+                        onClick={() => handlePlayYtTrack(ytLikedSongs[0])}
+                        style={{ padding: '8px 16px', fontSize: '0.84rem' }}
+                      >
+                        <span className="material-symbols-rounded">play_arrow</span>
+                        <span>Слушать всё</span>
+                      </button>
+                    )}
+                    <button type="button" className="m3-btn m3-btn-tonal" onClick={fetchYtLiked} disabled={ytLoading}>
+                      <span className="material-symbols-rounded">refresh</span>
+                      <span>Обновить</span>
+                    </button>
+                  </div>
                 </div>
                 {ytLikedSongs.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '32px', color: '#8e8893' }}>
+                  <div style={{ textAlign: 'center', padding: '36px', color: '#8e8893' }}>
                     {ytLoading ? 'Загрузка списка понравившихся треков...' : 'Список пуст или требуется подключить Cookie YouTube Music.'}
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {ytLikedSongs.map((t, idx) => (
-                      <div
-                        key={idx}
-                        style={{
-                          background: '#18161c',
-                          borderRadius: '12px',
-                          padding: '10px 14px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: '12px',
-                        }}
-                      >
-                        {t.artwork_url ? (
-                          <img src={t.artwork_url} alt="" style={{ width: '42px', height: '42px', borderRadius: '8px', objectFit: 'cover' }} />
-                        ) : null}
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ fontWeight: 700, fontSize: '0.86rem', color: '#fff' }}>{t.title}</div>
-                          <div style={{ fontSize: '0.75rem', color: '#9d96a2' }}>{t.artist}</div>
-                        </div>
-                        <button
-                          type="button"
-                          className="m3-btn m3-btn-primary"
-                          style={{ padding: '6px 14px', fontSize: '0.78rem' }}
+                    {ytLikedSongs.map((t, idx) => {
+                      const isPlayingThis = playerStatus.track && t.title && playerStatus.track.toLowerCase().includes(t.title.toLowerCase().slice(0, 15));
+                      return (
+                        <div
+                          key={t.id || idx}
+                          className={`m3-track-row ${isPlayingThis ? 'is-active-track' : ''}`}
                           onClick={() => handlePlayYtTrack(t)}
+                          title="Нажмите, чтобы включить"
                         >
-                          <span className="material-symbols-rounded" style={{ fontSize: '16px' }}>play_arrow</span>
-                          <span>Слушать</span>
-                        </button>
-                      </div>
-                    ))}
+                          <div className="m3-track-index">
+                            {isPlayingThis ? (
+                              <span className="material-symbols-rounded" style={{ color: '#ffb4c2', fontSize: '20px' }}>graphic_eq</span>
+                            ) : (
+                              <span>{idx + 1}</span>
+                            )}
+                          </div>
+
+                          {t.artwork_url ? (
+                            <img src={t.artwork_url} alt="" className="m3-track-cover" />
+                          ) : (
+                            <div className="m3-track-cover">
+                              <span className="material-symbols-rounded" style={{ color: '#ffb4c2', fontSize: '22px' }}>favorite</span>
+                            </div>
+                          )}
+
+                          <div className="m3-track-info">
+                            <div className="m3-track-title">{t.title}</div>
+                            <div className="m3-track-subtitle">
+                              <span>{t.artist || 'YouTube Music'}</span>
+                            </div>
+                          </div>
+
+                          {t.duration_seconds ? (
+                            <div className="m3-track-duration">
+                              {formatSeconds(t.duration_seconds)}
+                            </div>
+                          ) : null}
+
+                          <button
+                            type="button"
+                            className="m3-track-action-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handlePlayYtTrack(t);
+                            }}
+                            title="Воспроизвести"
+                          >
+                            <span className="material-symbols-rounded" style={{ fontSize: '20px' }}>
+                              {isPlayingThis && playerStatus.state === 'playing' ? 'pause' : 'play_arrow'}
+                            </span>
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
             )}
 
-            {/* ----------------- SUBTAB: PLAYLISTS ----------------- */}
+            {/* ----------------- SUBTAB: PLAYLISTS (Point 2) ----------------- */}
             {ytSubTab === 'playlists' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {selectedYtPlaylist ? (
-                  <div className="m3-surface-card">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-                      <button
-                        type="button"
-                        className="m3-btn m3-btn-icon"
-                        onClick={() => setSelectedYtPlaylist(null)}
-                      >
-                        <span className="material-symbols-rounded">arrow_back</span>
-                      </button>
-                      <div>
-                        <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#fff' }}>
-                          {selectedYtPlaylist.title}
+                  <div className="m3-surface-card" style={{ padding: '24px' }}>
+                    {/* Playlist Header Banner */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                        <button
+                          type="button"
+                          className="m3-btn m3-btn-icon"
+                          onClick={() => {
+                            setSelectedYtPlaylist(null);
+                            setPlaylistSearchFilter('');
+                          }}
+                          title="Назад ко всем плейлистам"
+                        >
+                          <span className="material-symbols-rounded">arrow_back</span>
+                        </button>
+                        {selectedYtPlaylist.artwork_url ? (
+                          <img src={selectedYtPlaylist.artwork_url} alt="" style={{ width: '64px', height: '64px', borderRadius: '14px', objectFit: 'cover' }} />
+                        ) : (
+                          <div style={{ width: '64px', height: '64px', borderRadius: '14px', background: '#25212c', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <span className="material-symbols-rounded" style={{ color: '#ffb4c2', fontSize: '32px' }}>queue_music</span>
+                          </div>
+                        )}
+                        <div>
+                          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fff' }}>
+                            {selectedYtPlaylist.title}
+                          </div>
+                          <div style={{ fontSize: '0.84rem', color: '#a49ea8', marginTop: '2px' }}>
+                            {selectedYtPlaylist.subtitle || 'Плейлист YouTube Music'} • {ytPlaylistTracks.length} треков
+                          </div>
                         </div>
-                        <div style={{ fontSize: '0.78rem', color: '#ffb4c2' }}>
-                          {selectedYtPlaylist.subtitle || 'Плейлист YouTube Music'} • {ytPlaylistTracks.length} треков
-                        </div>
+                      </div>
+
+                      {/* Header Actions */}
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button
+                          type="button"
+                          className="m3-btn m3-btn-primary"
+                          disabled={ytPlaylistTracks.length === 0}
+                          onClick={() => ytPlaylistTracks.length > 0 && handlePlayYtTrack(ytPlaylistTracks[0])}
+                          style={{ padding: '10px 20px', fontWeight: 700 }}
+                        >
+                          <span className="material-symbols-rounded">play_arrow</span>
+                          <span>Воспроизвести всё</span>
+                        </button>
                       </div>
                     </div>
 
+                    {/* Quick In-Playlist Filter */}
+                    {ytPlaylistTracks.length > 3 && (
+                      <div style={{ marginBottom: '16px' }}>
+                        <input
+                          type="text"
+                          className="m3-input"
+                          placeholder="Поиск по названию или исполнителю в этом плейлисте..."
+                          value={playlistSearchFilter}
+                          onChange={(e) => setPlaylistSearchFilter(e.target.value)}
+                        />
+                      </div>
+                    )}
+
+                    {/* Track List */}
                     {ytLoading && ytPlaylistTracks.length === 0 ? (
-                      <div style={{ textAlign: 'center', padding: '30px', color: '#ffb4c2' }}>Загрузка треков плейлиста...</div>
+                      <div style={{ textAlign: 'center', padding: '36px', color: '#ffb4c2' }}>Загрузка треков плейлиста...</div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {ytPlaylistTracks.map((t, idx) => (
-                          <div
-                            key={idx}
-                            style={{
-                              background: '#18161c',
-                              borderRadius: '12px',
-                              padding: '10px 14px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              gap: '12px',
-                            }}
-                          >
-                            {t.artwork_url && (
-                              <img src={t.artwork_url} alt="" style={{ width: '40px', height: '40px', borderRadius: '8px', objectFit: 'cover' }} />
-                            )}
-                            <div style={{ minWidth: 0, flex: 1 }}>
-                              <div style={{ fontWeight: 700, fontSize: '0.86rem', color: '#fff' }}>{t.title}</div>
-                              <div style={{ fontSize: '0.75rem', color: '#9d96a2' }}>{t.artist}</div>
-                            </div>
-                            <button
-                              type="button"
-                              className="m3-btn m3-btn-primary"
-                              style={{ padding: '6px 14px', fontSize: '0.78rem' }}
-                              onClick={() => handlePlayYtTrack(t)}
-                            >
-                              <span className="material-symbols-rounded" style={{ fontSize: '16px' }}>play_arrow</span>
-                              <span>Play</span>
-                            </button>
-                          </div>
-                        ))}
+                        {ytPlaylistTracks
+                          .filter((t) => {
+                            if (!playlistSearchFilter.trim()) return true;
+                            const q = playlistSearchFilter.toLowerCase();
+                            return (t.title || '').toLowerCase().includes(q) || (t.artist || '').toLowerCase().includes(q);
+                          })
+                          .map((t, idx) => {
+                            const isPlayingThis = playerStatus.track && t.title && playerStatus.track.toLowerCase().includes(t.title.toLowerCase().slice(0, 15));
+                            return (
+                              <div
+                                key={t.id || idx}
+                                className={`m3-track-row ${isPlayingThis ? 'is-active-track' : ''}`}
+                                onClick={() => handlePlayYtTrack(t)}
+                                title="Нажмите, чтобы включить"
+                              >
+                                <div className="m3-track-index">
+                                  {isPlayingThis ? (
+                                    <span className="material-symbols-rounded" style={{ color: '#ffb4c2', fontSize: '20px' }}>graphic_eq</span>
+                                  ) : (
+                                    <span>{idx + 1}</span>
+                                  )}
+                                </div>
+
+                                {t.artwork_url ? (
+                                  <img src={t.artwork_url} alt="" className="m3-track-cover" />
+                                ) : (
+                                  <div className="m3-track-cover">
+                                    <span className="material-symbols-rounded" style={{ color: '#ffb4c2', fontSize: '22px' }}>music_note</span>
+                                  </div>
+                                )}
+
+                                <div className="m3-track-info">
+                                  <div className="m3-track-title">{t.title}</div>
+                                  <div className="m3-track-subtitle">
+                                    <span>{t.artist || 'YouTube Music'}</span>
+                                  </div>
+                                </div>
+
+                                {t.duration_seconds ? (
+                                  <div className="m3-track-duration">
+                                    {formatSeconds(t.duration_seconds)}
+                                  </div>
+                                ) : null}
+
+                                <button
+                                  type="button"
+                                  className="m3-track-action-btn"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handlePlayYtTrack(t);
+                                  }}
+                                  title="Воспроизвести"
+                                >
+                                  <span className="material-symbols-rounded" style={{ fontSize: '20px' }}>
+                                    {isPlayingThis && playerStatus.state === 'playing' ? 'pause' : 'play_arrow'}
+                                  </span>
+                                </button>
+                              </div>
+                            );
+                          })}
                       </div>
                     )}
                   </div>
@@ -3516,6 +3706,240 @@ export default function App() {
                   </div>
                 </div>
               )}
+
+              {/* Groq LLM Block */}
+              {llmProviderInput === 'groq' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Groq Cloud API Key (gsk_...):</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="gsk_..."
+                      value={groqKeyInput}
+                      onChange={(e) => setGroqKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель Groq:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="llama-3.3-70b-versatile или deepseek-r1-distill-llama-70b"
+                      value={groqModelInput}
+                      onChange={(e) => setGroqModelInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* OpenAI Direct LLM Block */}
+              {llmProviderInput === 'openai' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">OpenAI API Key (sk-proj-...):</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="sk-proj-..."
+                      value={openaiKeyInput}
+                      onChange={(e) => setOpenaiKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель OpenAI:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="gpt-4o-mini или gpt-4o"
+                      value={openaiModelInput}
+                      onChange={(e) => setOpenaiModelInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* DeepSeek Direct LLM Block */}
+              {llmProviderInput === 'deepseek' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">DeepSeek API Key (sk-...):</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="sk-..."
+                      value={deepseekKeyInput}
+                      onChange={(e) => setDeepseekKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель DeepSeek (api.deepseek.com):</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="deepseek-chat или deepseek-reasoner"
+                      value={deepseekModelInput}
+                      onChange={(e) => setDeepseekModelInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Google Gemini Direct LLM Block */}
+              {llmProviderInput === 'gemini' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Google Gemini API Key (AIzaSy...):</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="AIzaSy..."
+                      value={geminiKeyInput}
+                      onChange={(e) => setGeminiKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель Gemini:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="gemini-2.5-flash или gemini-1.5-flash"
+                      value={geminiModelInput}
+                      onChange={(e) => setGeminiModelInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Anthropic Claude LLM Block */}
+              {llmProviderInput === 'anthropic' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Anthropic API Key (sk-ant-...):</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="sk-ant-..."
+                      value={anthropicKeyInput}
+                      onChange={(e) => setAnthropicKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель Claude:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="claude-3-5-haiku-latest или claude-3-5-sonnet-latest"
+                      value={anthropicModelInput}
+                      onChange={(e) => setAnthropicModelInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Mistral AI LLM Block */}
+              {llmProviderInput === 'mistral' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Mistral API Key:</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="API ключ Mistral..."
+                      value={mistralKeyInput}
+                      onChange={(e) => setMistralKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель Mistral:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="mistral-small-latest или mistral-large-latest"
+                      value={mistralModelInput}
+                      onChange={(e) => setMistralModelInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Perplexity AI LLM Block */}
+              {llmProviderInput === 'perplexity' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Perplexity API Key (pplx-...):</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="pplx-..."
+                      value={perplexityKeyInput}
+                      onChange={(e) => setPerplexityKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель Perplexity:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="sonar или sonar-pro"
+                      value={perplexityModelInput}
+                      onChange={(e) => setPerplexityModelInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Together AI LLM Block */}
+              {llmProviderInput === 'together' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Together AI API Key:</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="Together API Key..."
+                      value={togetherKeyInput}
+                      onChange={(e) => setTogetherKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель Together:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="meta-llama/Llama-3.3-70B-Instruct-Turbo"
+                      value={togetherModelInput}
+                      onChange={(e) => setTogetherModelInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Custom / Local LLM Block */}
+              {llmProviderInput === 'custom' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">URL совместимого OpenAI сервера (Ollama, LM Studio):</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="http://192.168.0.104:11434/v1"
+                      value={customLlmBaseUrlInput}
+                      onChange={(e) => setCustomLlmBaseUrlInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Имя модели:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="llama3 или qwen2.5"
+                      value={customLlmModelInput}
+                      onChange={(e) => setCustomLlmModelInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* STT Settings */}
@@ -3603,6 +4027,126 @@ export default function App() {
                   </div>
                 </div>
               )}
+
+              {/* OpenRouter Whisper STT Block */}
+              {sttProviderInput === 'openrouter' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">OpenRouter API Key (или оставьте пустым, если указан в LLM):</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="sk-or-v1-..."
+                      value={openrouterSttKeyInput || openrouterKeyInput}
+                      onChange={(e) => setOpenrouterSttKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель STT OpenRouter:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="openai/whisper"
+                      value={openrouterSttModelInput}
+                      onChange={(e) => setOpenrouterSttModelInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Groq Whisper STT Block */}
+              {sttProviderInput === 'groq' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Groq API Key (или оставьте пустым, если указан в LLM):</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="gsk_..."
+                      value={groqSttKeyInput || groqKeyInput}
+                      onChange={(e) => setGroqSttKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель Groq Whisper:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="whisper-large-v3-turbo или whisper-large-v3"
+                      value={groqSttModelInput}
+                      onChange={(e) => setGroqSttModelInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* OpenAI Whisper API Block */}
+              {sttProviderInput === 'openai' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">OpenAI API Key (или оставьте пустым, если указан в LLM):</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="sk-proj-..."
+                      value={openaiSttKeyInput || openaiKeyInput}
+                      onChange={(e) => setOpenaiSttKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель Whisper:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="whisper-1"
+                      value={openaiSttModelInput}
+                      onChange={(e) => setOpenaiSttModelInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Deepgram Nova-2 STT Block */}
+              {sttProviderInput === 'deepgram' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Deepgram API Key:</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="Deepgram Secret Token..."
+                      value={deepgramSttKeyInput}
+                      onChange={(e) => setDeepgramSttKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель Deepgram:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="nova-2 или nova-2-general"
+                      value={deepgramSttModelInput}
+                      onChange={(e) => setDeepgramSttModelInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Custom HTTP Whisper STT Block */}
+              {sttProviderInput === 'custom' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">URL сервера Whisper (POST multipart/form-data):</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="http://192.168.0.104:8000/v1/audio/transcriptions"
+                      value={customSttUrlInput}
+                      onChange={(e) => setCustomSttUrlInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* TTS Settings */}
@@ -3629,6 +4173,21 @@ export default function App() {
                   <option value="custom">💻 Свой TTS HTTP сервис (Silero, Piper, кастомный URL)</option>
                 </select>
               </div>
+
+              {/* Google Translate TTS Block */}
+              {ttsProviderInput === 'google' && (
+                <div style={{ background: '#19171d', padding: '16px', borderRadius: '16px', border: 'none', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#25212c', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span className="material-symbols-rounded" style={{ color: '#78dc96', fontSize: '24px' }}>check_circle</span>
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#fff' }}>Google Translate TTS (Бесплатно)</div>
+                    <div style={{ fontSize: '0.78rem', color: '#a49ea8' }}>
+                      Не требует API ключей и регистрации. Синтезирует русскую речь напрямую с серверов Google.
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Cloudflare TTS Block */}
               {ttsProviderInput === 'cloudflare' && (
@@ -3725,6 +4284,181 @@ export default function App() {
                       placeholder='{"lang": "ru", "speed": 1.0}'
                       value={cfTtsExtraInput}
                       onChange={(e) => setCfTtsExtraInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* OpenRouter Speech TTS Block */}
+              {ttsProviderInput === 'openrouter' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">OpenRouter API Key (или оставьте пустым для использования из LLM):</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="sk-or-v1-..."
+                      value={openrouterTtsKeyInput || openrouterKeyInput}
+                      onChange={(e) => setOpenrouterTtsKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель OpenRouter TTS:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="openai/tts-1 или openai/tts-1-hd"
+                      value={openrouterTtsModelInput}
+                      onChange={(e) => setOpenrouterTtsModelInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Голос OpenRouter:</label>
+                    <select
+                      className="m3-select"
+                      value={openrouterTtsVoiceInput}
+                      onChange={(e) => setOpenrouterTtsVoiceInput(e.target.value)}
+                    >
+                      <option value="alloy">alloy (Нейтральный)</option>
+                      <option value="echo">echo (Теплый мужской)</option>
+                      <option value="fable">fable (Британский акцент)</option>
+                      <option value="onyx">onyx (Глубокий авторитетный)</option>
+                      <option value="nova">nova (Энергичный женский)</option>
+                      <option value="shimmer">shimmer (Мягкий ясный женский)</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* ElevenLabs TTS Block */}
+              {ttsProviderInput === 'elevenlabs' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">ElevenLabs API Key (xi-api-key):</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="xi-api-key..."
+                      value={elevenKeyInput}
+                      onChange={(e) => setElevenKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель ElevenLabs:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="eleven_multilingual_v2"
+                      value={elevenModelInput}
+                      onChange={(e) => setElevenModelInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Voice ID (ID клонированного или стандартного голоса):</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="21m00Tcm4TlvDq8ikWAM (Rachel) или ваш Voice ID"
+                      value={elevenVoiceIdInput}
+                      onChange={(e) => setElevenVoiceIdInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* OpenAI Direct TTS Block */}
+              {ttsProviderInput === 'openai' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">OpenAI API Key (или оставьте пустым для использования из LLM):</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="sk-proj-..."
+                      value={openaiTtsKeyInput || openaiKeyInput}
+                      onChange={(e) => setOpenaiTtsKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель OpenAI TTS:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="tts-1 или tts-1-hd"
+                      value={openaiTtsModelInput}
+                      onChange={(e) => setOpenaiTtsModelInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Голос OpenAI:</label>
+                    <select
+                      className="m3-select"
+                      value={openaiTtsVoiceInput}
+                      onChange={(e) => setOpenaiTtsVoiceInput(e.target.value)}
+                    >
+                      <option value="alloy">alloy</option>
+                      <option value="echo">echo</option>
+                      <option value="fable">fable</option>
+                      <option value="onyx">onyx</option>
+                      <option value="nova">nova</option>
+                      <option value="shimmer">shimmer</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* Deepgram Aura TTS Block */}
+              {ttsProviderInput === 'deepgram' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Deepgram API Key (или оставьте пустым для использования из STT):</label>
+                    <input
+                      type="password"
+                      className="m3-input"
+                      placeholder="Deepgram Token..."
+                      value={deepgramTtsKeyInput || deepgramSttKeyInput}
+                      onChange={(e) => setDeepgramTtsKeyInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="m3-form-group">
+                    <label className="m3-label">Модель / Голос Aura:</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="aura-asteria-en или aura-luna-en"
+                      value={deepgramTtsModelInput}
+                      onChange={(e) => setDeepgramTtsModelInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* RHVoice Local TTS Block */}
+              {ttsProviderInput === 'rhvoice' && (
+                <div style={{ background: '#19171d', padding: '16px', borderRadius: '16px', border: 'none', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#25212c', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span className="material-symbols-rounded" style={{ color: '#00e5ff', fontSize: '24px' }}>offline_bolt</span>
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#fff' }}>RHVoice — Локальный синтез речи</div>
+                    <div style={{ fontSize: '0.78rem', color: '#a49ea8' }}>
+                      Работает полностью автономно на процессоре станции без обращения к интернету и без API ключей. Голоса: Александр, Елена, Анна.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Custom HTTP TTS Block */}
+              {ttsProviderInput === 'custom' && (
+                <div style={{ background: '#19171d', padding: '14px', borderRadius: '16px', border: 'none', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="m3-form-group">
+                    <label className="m3-label">URL сервера TTS (GET/POST с параметром text):</label>
+                    <input
+                      type="text"
+                      className="m3-input"
+                      placeholder="http://192.168.0.104:8000/tts?text="
+                      value={customTtsUrlInput}
+                      onChange={(e) => setCustomTtsUrlInput(e.target.value)}
                     />
                   </div>
                 </div>
@@ -5520,9 +6254,61 @@ data:
                   style={{ minWidth: '220px' }}
                 >
                   <span className="material-symbols-rounded">save</span>
+                  <span>Сохранить всё в JSON</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Bottom Dedicated Save Card (Point 3) */}
+            <div className="m3-surface-card" style={{ background: '#1c1922', padding: '22px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+                <div>
+                  <div className="m3-card-title" style={{ marginBottom: '4px' }}>
+                    <span className="material-symbols-rounded" style={{ color: '#ffb4c2' }}>save</span>
+                    <span>Сохранение конфигурации в JSON</span>
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: '#a49ea8' }}>
+                    Записывает настройки всех разделов (LLM, STT, TTS, SOCKS5, DNS, Wi-Fi, IP) в постоянную память /data/config.json.
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="m3-btn m3-btn-primary"
+                  onClick={handleSaveSettings}
+                  style={{ minWidth: '260px', padding: '14px 28px', fontSize: '1rem', fontWeight: 800, gap: '10px' }}
+                >
+                  <span className="material-symbols-rounded" style={{ fontSize: '24px' }}>save</span>
                   <span>Сохранить всё в config.json</span>
                 </button>
               </div>
+            </div>
+
+            {/* Pinned / Sticky Save Bar in Settings (Point 3) */}
+            <div className="m3-settings-sticky-bar">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: '#362e3e', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <span className="material-symbols-rounded" style={{ color: '#ffb4c2', fontSize: '24px' }}>settings_suggest</span>
+                </div>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: '0.96rem', color: '#fff' }}>
+                    Конфигурация Yandex Station Lite
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#a49ea8' }}>
+                    Все параметры сохраняются в постоянный /data/config.json
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="m3-btn m3-btn-primary"
+                onClick={handleSaveSettings}
+                style={{ padding: '12px 28px', fontSize: '0.98rem', fontWeight: 800, gap: '10px' }}
+              >
+                <span className="material-symbols-rounded" style={{ fontSize: '22px' }}>save</span>
+                <span>Сохранить всё в config.json</span>
+              </button>
             </div>
 
           </div>
