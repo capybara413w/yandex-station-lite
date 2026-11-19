@@ -1901,7 +1901,7 @@ export default function App() {
         {/* Ringing Alert Banner if any timer or alarm is ringing */}
         {isAlarmRinging && (
           <div style={{
-            background: 'linear-gradient(135deg, #b00020, #e91e63)',
+            background: '#b00020',
             color: '#fff',
             padding: '16px 24px',
             borderRadius: '20px',
@@ -1909,7 +1909,6 @@ export default function App() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            boxShadow: '0 6px 24px rgba(233, 30, 99, 0.4)',
             gap: '16px',
             flexWrap: 'wrap'
           }}>
@@ -1938,8 +1937,7 @@ export default function App() {
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.2)'
+                gap: '8px'
               }}
             >
               <span className="material-symbols-rounded" style={{ fontSize: '20px' }}>stop_circle</span>
@@ -1960,7 +1958,7 @@ export default function App() {
                       <span className="material-symbols-rounded" style={{ fontSize: '24px' }}>tune</span>
                       <span>Быстрые настройки</span>
                     </div>
-                    <span style={{ fontSize: '0.74rem', fontWeight: 700, background: '#2d2535', color: '#ffb4c2', border: '1px solid rgba(255, 121, 198, 0.25)', padding: '4px 10px', borderRadius: '12px' }}>
+                    <span style={{ fontSize: '0.74rem', fontWeight: 700, background: '#2d2535', color: '#ffb4c2', padding: '4px 10px', borderRadius: '12px' }}>
                       ОНЛАЙН • {stationDisplayIp}
                     </span>
                   </div>
@@ -2419,7 +2417,7 @@ export default function App() {
                     height: '140px',
                     borderRadius: '24px',
                     background: '#25222b',
-                    border: '1px solid rgba(255, 121, 198, 0.2)',
+                    border: 'none',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -2435,7 +2433,6 @@ export default function App() {
                       width: '92px',
                       height: '92px',
                       objectFit: 'contain',
-                      filter: 'drop-shadow(0 4px 10px rgba(0,0,0,0.4))',
                       transform: playerStatus.state === 'playing' ? 'scale(1.06)' : 'scale(1)',
                       transition: 'transform 0.3s ease',
                     }}
@@ -2603,7 +2600,7 @@ export default function App() {
                     style={{
                       padding: '6px 14px',
                       borderRadius: '9999px',
-                      border: '1px solid ' + (ytStatus.is_authenticated ? '#4caf50' : '#ffa726'),
+                      border: 'none',
                       background: ytStatus.is_authenticated ? 'rgba(76, 175, 80, 0.12)' : 'rgba(255, 167, 38, 0.12)',
                       color: ytStatus.is_authenticated ? '#81c784' : '#ffb74d',
                       fontSize: '0.8rem',
@@ -3191,7 +3188,7 @@ export default function App() {
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
                 {/* AirPlay 2 Receiver */}
-                <div style={{ background: '#17151b', borderRadius: '16px', padding: '16px', border: '1px solid #28242f' }}>
+                <div style={{ background: '#17151b', borderRadius: '16px', padding: '16px', border: 'none' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, color: '#fff' }}>
                       <span className="material-symbols-rounded" style={{ color: '#90caf9' }}>airplay</span>
@@ -3233,7 +3230,7 @@ export default function App() {
                 </div>
 
                 {/* Spotify Connect */}
-                <div style={{ background: '#17151b', borderRadius: '16px', padding: '16px', border: '1px solid #28242f' }}>
+                <div style={{ background: '#17151b', borderRadius: '16px', padding: '16px', border: 'none' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, color: '#fff' }}>
                       <span className="material-symbols-rounded" style={{ color: '#1db954' }}>album</span>
@@ -3275,7 +3272,7 @@ export default function App() {
                 </div>
 
                 {/* Snapcast Multi-room */}
-                <div style={{ background: '#17151b', borderRadius: '16px', padding: '16px', border: '1px solid #28242f' }}>
+                <div style={{ background: '#17151b', borderRadius: '16px', padding: '16px', border: 'none' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, color: '#fff' }}>
                       <span className="material-symbols-rounded" style={{ color: '#ce93d8' }}>speaker_group</span>
@@ -3327,7 +3324,7 @@ export default function App() {
                 </div>
 
                 {/* Bluetooth A2DP Sink */}
-                <div style={{ background: '#17151b', borderRadius: '16px', padding: '16px', border: '1px solid #28242f' }}>
+                <div style={{ background: '#17151b', borderRadius: '16px', padding: '16px', border: 'none' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, color: '#fff' }}>
                       <span className="material-symbols-rounded" style={{ color: '#80deea' }}>bluetooth_audio</span>
@@ -3419,7 +3416,7 @@ export default function App() {
 
               {dialogueLogs.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '28px 16px', color: '#a49ea8', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-                  <img src="/assets/boykisser/boykisser_5.png" alt="boykisser" style={{ width: '84px', height: '84px', objectFit: 'contain', filter: 'drop-shadow(0 4px 12px rgba(255,121,198,0.25))' }} />
+                  <img src="/assets/boykisser/boykisser_5.png" alt="boykisser" style={{ width: '84px', height: '84px', objectFit: 'contain' }} />
                   <div style={{ fontWeight: 700, fontSize: '0.94rem', color: '#ffb4c2' }}>
                     Ты любишь задавать вопросы, да? :3
                   </div>
@@ -3795,7 +3792,6 @@ export default function App() {
                   height: '12px',
                   borderRadius: '50%',
                   background: hassStatus.connected ? '#4caf50' : '#f44336',
-                  boxShadow: hassStatus.connected ? '0 0 10px #4caf50' : 'none',
                 }} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600, fontSize: '0.9rem', color: hassStatus.connected ? '#81c784' : '#e57373' }}>
@@ -4434,8 +4430,8 @@ data:
                       <div
                         key={timer.id}
                         style={{
-                          background: timer.is_ringing ? 'linear-gradient(135deg, rgba(233,30,99,0.3), rgba(176,0,32,0.3))' : '#161419',
-                          border: timer.is_ringing ? '1px solid #e91e63' : '1px solid rgba(255, 255, 255, 0.06)',
+                          background: timer.is_ringing ? '#521424' : '#161419',
+                          border: 'none',
                           borderRadius: '16px',
                           padding: '16px 18px',
                           display: 'flex',
@@ -5773,7 +5769,7 @@ data:
                     key={m.id}
                     style={{
                       background: '#1a1820',
-                      border: '1px solid rgba(255, 121, 198, 0.22)',
+                      border: 'none',
                       borderRadius: '14px',
                       padding: '10px 6px',
                       display: 'flex',
@@ -5858,7 +5854,8 @@ data:
               maxWidth: '560px',
               width: '100%',
               background: '#1d1b22',
-              boxShadow: '0 16px 40px rgba(0,0,0,0.6)',
+              border: 'none',
+              boxShadow: 'none',
               maxHeight: '90vh',
               overflowY: 'auto',
             }}
