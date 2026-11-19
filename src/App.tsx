@@ -1759,6 +1759,7 @@ export default function App() {
           <svg viewBox="0 0 100 100" className="m3-avatar-scallop-svg">
             <path d="M50 4 C58 4 62 10 68 12 C74 14 80 13 85 18 C90 23 89 29 93 35 C97 41 103 45 103 52 C103 59 97 63 93 69 C89 75 90 81 85 86 C80 91 74 90 68 92 C62 94 58 100 50 100 C42 100 38 94 32 92 C26 90 20 91 15 86 C10 81 11 75 7 69 C3 63 -3 59 -3 52 C-3 45 3 41 7 35 C11 29 10 23 15 18 C20 13 26 14 32 12 C38 10 42 4 50 4 Z" transform="translate(0, -2)" />
           </svg>
+          <img src="/assets/boykisser/boykisser_3.png" alt="boykisser" className="m3-avatar-scallop-inner-img" />
         </div>
 
         {/* Rail Destinations */}
@@ -1891,6 +1892,7 @@ export default function App() {
             onClick={() => setIsBoykisserModalOpen(true)}
             title="Информация о станции"
           >
+            <img src="/assets/boykisser/boykisser_2.png" alt="boykisser" style={{ width: '22px', height: '22px', borderRadius: '50%' }} />
             <span>boykisser</span>
             <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>pets</span>
           </button>
@@ -1950,24 +1952,24 @@ export default function App() {
         {activeTab === 'home' && (
           <div className="m3-tab-view">
             <div className="m3-home-grid">
-              {/* Left Large Flat Pink Card (Быстрые настройки) */}
+              {/* Left Large Flat Card (Быстрые настройки) */}
               <div className="m3-hero-pink-card">
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.05rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#370014' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.05rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#ffb4c2' }}>
                       <span className="material-symbols-rounded" style={{ fontSize: '24px' }}>tune</span>
                       <span>Быстрые настройки</span>
                     </div>
-                    <span style={{ fontSize: '0.74rem', fontWeight: 700, background: '#3a3246', color: '#ffb4c2', padding: '4px 10px', borderRadius: '12px' }}>
+                    <span style={{ fontSize: '0.74rem', fontWeight: 700, background: '#2d2535', color: '#ffb4c2', border: '1px solid rgba(255, 121, 198, 0.25)', padding: '4px 10px', borderRadius: '12px' }}>
                       ОНЛАЙН • {stationDisplayIp}
                     </span>
                   </div>
 
-                  {/* 1. Громкость Станции с пресетами (Slightly lighter buttons #2d2636) */}
+                  {/* 1. Громкость Станции с пресетами */}
                   <div style={{ marginBottom: '16px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', fontWeight: 700, color: '#370014', marginBottom: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', fontWeight: 700, color: '#f5edf2', marginBottom: '6px' }}>
                       <span>Громкость колонки (TAS5805M):</span>
-                      <span>{volumeSlider}%</span>
+                      <span style={{ color: '#ffb4c2' }}>{volumeSlider}%</span>
                     </div>
                     <input
                       type="range"
@@ -1981,7 +1983,7 @@ export default function App() {
                       onMouseUp={() => sendVolumeChange(volumeSlider)}
                       className="m3-slider-pink"
                     />
-                    <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                    <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
                       {[0, 20, 50, 70, 100].map((v) => (
                         <button
                           key={v}
@@ -1992,9 +1994,9 @@ export default function App() {
                             fontSize: '0.75rem',
                             fontWeight: 700,
                             borderRadius: '10px',
-                            border: 'none',
-                            background: volumeSlider === v ? '#3a3246' : 'rgba(58, 50, 70, 0.24)',
-                            color: volumeSlider === v ? '#ffb4c2' : '#370014',
+                            border: volumeSlider === v ? 'none' : '1px solid rgba(255, 121, 198, 0.18)',
+                            background: volumeSlider === v ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-surface-container-high)',
+                            color: volumeSlider === v ? 'var(--md-sys-color-on-primary)' : '#ded7e0',
                             cursor: 'pointer',
                             transition: 'all 0.15s ease',
                           }}
@@ -2009,10 +2011,10 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 2. Быстрый выбор провайдеров (Dark in background tone, slightly lighter #3a3246, no white) */}
+                  {/* 2. Быстрый выбор провайдеров */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px' }}>
                     <div>
-                      <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#370014', display: 'block', marginBottom: '4px' }}>
+                      <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#ded7e0', display: 'block', marginBottom: '4px' }}>
                         Синтез речи (TTS Engine):
                       </label>
                       <select
@@ -2030,7 +2032,7 @@ export default function App() {
                     </div>
 
                     <div>
-                      <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#370014', display: 'block', marginBottom: '4px' }}>
+                      <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#ded7e0', display: 'block', marginBottom: '4px' }}>
                         Нейросеть (LLM Brain):
                       </label>
                       <select
@@ -2048,7 +2050,7 @@ export default function App() {
                     </div>
 
                     <div>
-                      <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#370014', display: 'block', marginBottom: '4px' }}>
+                      <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#ded7e0', display: 'block', marginBottom: '4px' }}>
                         Распознавание речи (STT):
                       </label>
                       <select
@@ -2064,16 +2066,16 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 3. Toggles (Slightly lighter #3a3246) */}
+                  {/* 3. Toggles */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '14px' }}>
                     <button
                       type="button"
                       style={{
                         padding: '10px 8px',
                         borderRadius: '12px',
-                        border: 'none',
-                        background: socks5EnabledInput ? '#3a3246' : 'rgba(58, 50, 70, 0.24)',
-                        color: socks5EnabledInput ? '#ffb4c2' : '#370014',
+                        border: socks5EnabledInput ? 'none' : '1px solid rgba(255, 121, 198, 0.18)',
+                        background: socks5EnabledInput ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-surface-container-high)',
+                        color: socks5EnabledInput ? 'var(--md-sys-color-on-primary)' : '#ded7e0',
                         fontWeight: 700,
                         fontSize: '0.74rem',
                         cursor: 'pointer',
@@ -2094,9 +2096,9 @@ export default function App() {
                       style={{
                         padding: '10px 8px',
                         borderRadius: '12px',
-                        border: 'none',
-                        background: dnsCustomEnabledInput ? '#3a3246' : 'rgba(58, 50, 70, 0.24)',
-                        color: dnsCustomEnabledInput ? '#ffb4c2' : '#370014',
+                        border: dnsCustomEnabledInput ? 'none' : '1px solid rgba(255, 121, 198, 0.18)',
+                        background: dnsCustomEnabledInput ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-surface-container-high)',
+                        color: dnsCustomEnabledInput ? 'var(--md-sys-color-on-primary)' : '#ded7e0',
                         fontWeight: 700,
                         fontSize: '0.74rem',
                         cursor: 'pointer',
@@ -2122,9 +2124,9 @@ export default function App() {
                       style={{
                         padding: '10px 8px',
                         borderRadius: '12px',
-                        border: 'none',
-                        background: visualizerEnabledInput ? '#3a3246' : 'rgba(58, 50, 70, 0.24)',
-                        color: visualizerEnabledInput ? '#ffb4c2' : '#370014',
+                        border: visualizerEnabledInput ? 'none' : '1px solid rgba(255, 121, 198, 0.18)',
+                        background: visualizerEnabledInput ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-surface-container-high)',
+                        color: visualizerEnabledInput ? 'var(--md-sys-color-on-primary)' : '#ded7e0',
                         fontWeight: 700,
                         fontSize: '0.74rem',
                         cursor: 'pointer',
@@ -2416,19 +2418,29 @@ export default function App() {
                     width: '140px',
                     height: '140px',
                     borderRadius: '24px',
-                    background: '#28252e',
-                    border: 'none',
+                    background: '#25222b',
+                    border: '1px solid rgba(255, 121, 198, 0.2)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     flexDirection: 'column',
                     position: 'relative',
+                    overflow: 'hidden',
                   }}
                 >
-                  <span className="material-symbols-rounded" style={{ fontSize: '56px', color: '#ffb4c2' }}>
-                    {playerStatus.state === 'playing' ? 'music_note' : 'pause_circle'}
-                  </span>
-                  <span style={{ fontSize: '0.68rem', fontWeight: 700, color: playerStatus.state === 'playing' ? '#78dc96' : '#a49ea8', marginTop: '2px' }}>
+                  <img
+                    src="/assets/boykisser/boykisser_4.png"
+                    alt="boykisser dj"
+                    style={{
+                      width: '92px',
+                      height: '92px',
+                      objectFit: 'contain',
+                      filter: 'drop-shadow(0 4px 10px rgba(0,0,0,0.4))',
+                      transform: playerStatus.state === 'playing' ? 'scale(1.06)' : 'scale(1)',
+                      transition: 'transform 0.3s ease',
+                    }}
+                  />
+                  <span style={{ fontSize: '0.68rem', fontWeight: 800, color: playerStatus.state === 'playing' ? '#78dc96' : '#a49ea8', marginTop: '2px' }}>
                     {playerStatus.state.toUpperCase()}
                   </span>
                 </div>
@@ -3280,26 +3292,28 @@ export default function App() {
                   <div style={{ fontSize: '0.78rem', color: '#9d96a2', marginBottom: '12px' }}>
                     Синхронная игра музыки по комнатам с сервером Snapcast (Home Assistant / Music Assistant).
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '8px' }}>
-                    <input
-                      type="text"
-                      className="m3-input"
-                      style={{ fontSize: '0.8rem', padding: '6px 10px' }}
-                      value={streamingStatus.snapcast_server}
-                      onChange={(e) => setStreamingStatus({ ...streamingStatus, snapcast_server: e.target.value })}
-                      placeholder="IP Snapserver"
-                    />
-                    <input
-                      type="number"
-                      className="m3-input"
-                      style={{ fontSize: '0.8rem', padding: '6px 8px', width: '70px' }}
-                      value={streamingStatus.snapcast_port}
-                      onChange={(e) => setStreamingStatus({ ...streamingStatus, snapcast_port: parseInt(e.target.value) || 1704 })}
-                    />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        type="text"
+                        className="m3-input"
+                        style={{ fontSize: '0.8rem', padding: '6px 10px', flex: 1, minWidth: 0 }}
+                        value={streamingStatus.snapcast_server}
+                        onChange={(e) => setStreamingStatus({ ...streamingStatus, snapcast_server: e.target.value })}
+                        placeholder="IP Snapserver (напр. 192.168.0.106)"
+                      />
+                      <input
+                        type="number"
+                        className="m3-input"
+                        style={{ fontSize: '0.8rem', padding: '6px 8px', width: '75px' }}
+                        value={streamingStatus.snapcast_port}
+                        onChange={(e) => setStreamingStatus({ ...streamingStatus, snapcast_port: parseInt(e.target.value) || 1704 })}
+                      />
+                    </div>
                     <button
                       type="button"
                       className={`m3-btn ${streamingStatus.snapcast_enabled ? 'm3-btn-tonal' : 'm3-btn-primary'}`}
-                      style={{ fontSize: '0.78rem', padding: '6px 12px', whiteSpace: 'nowrap' }}
+                      style={{ fontSize: '0.78rem', padding: '8px 12px', width: '100%', justifyContent: 'center' }}
                       onClick={() => updateStreamingConfig({
                         snapcast_enabled: !streamingStatus.snapcast_enabled,
                         snapcast_server: streamingStatus.snapcast_server,
@@ -3307,7 +3321,7 @@ export default function App() {
                       })}
                       disabled={isStreamingSaving}
                     >
-                      <span>{streamingStatus.snapcast_enabled ? 'Выкл' : 'Вкл'}</span>
+                      <span>{streamingStatus.snapcast_enabled ? 'Отключить Snapcast' : 'Включить Snapcast'}</span>
                     </button>
                   </div>
                 </div>
@@ -3404,8 +3418,14 @@ export default function App() {
               </div>
 
               {dialogueLogs.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '24px', color: '#8d8792', fontSize: '0.88rem' }}>
-                  История диалогов пуста. Задайте вопрос голосом или через текстовое поле!
+                <div style={{ textAlign: 'center', padding: '28px 16px', color: '#a49ea8', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                  <img src="/assets/boykisser/boykisser_5.png" alt="boykisser" style={{ width: '84px', height: '84px', objectFit: 'contain', filter: 'drop-shadow(0 4px 12px rgba(255,121,198,0.25))' }} />
+                  <div style={{ fontWeight: 700, fontSize: '0.94rem', color: '#ffb4c2' }}>
+                    Ты любишь задавать вопросы, да? :3
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: '#8d8792', maxWidth: '340px' }}>
+                    История диалогов пуста. Задайте вопрос голосом или напишите в поле выше!
+                  </div>
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '380px', overflowY: 'auto' }}>
@@ -4187,24 +4207,41 @@ data:
 
                 {/* HA Token */}
                 <div className="m3-form-group">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <label style={{ fontSize: '0.8rem', color: '#ded7e0' }}>Долговечный токен доступа (Long-Lived Access Token):</label>
+                  <label style={{ fontSize: '0.8rem', color: '#ded7e0', display: 'block', marginBottom: '6px' }}>
+                    Долговечный токен доступа (Long-Lived Access Token):
+                  </label>
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <input
+                      type={hassShowToken ? 'text' : 'password'}
+                      className="m3-input"
+                      style={{ paddingRight: '48px', width: '100%' }}
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+                      value={hassTokenInput}
+                      onChange={(e) => setHassTokenInput(e.target.value)}
+                    />
                     <button
                       type="button"
-                      className="m3-btn m3-btn-outlined"
-                      style={{ fontSize: '0.7rem', padding: '2px 8px' }}
                       onClick={() => setHassShowToken(!hassShowToken)}
+                      style={{
+                        position: 'absolute',
+                        right: '8px',
+                        background: 'none',
+                        border: 'none',
+                        color: '#ffb4c2',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '6px',
+                        borderRadius: '50%',
+                      }}
+                      title={hassShowToken ? 'Скрыть токен' : 'Показать токен'}
                     >
-                      {hassShowToken ? 'Скрыть' : 'Показать'}
+                      <span className="material-symbols-rounded" style={{ fontSize: '20px' }}>
+                        {hassShowToken ? 'visibility_off' : 'visibility'}
+                      </span>
                     </button>
                   </div>
-                  <input
-                    type={hassShowToken ? 'text' : 'password'}
-                    className="m3-input"
-                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
-                    value={hassTokenInput}
-                    onChange={(e) => setHassTokenInput(e.target.value)}
-                  />
                   <div style={{ fontSize: '0.72rem', color: '#9e97a3' }}>
                     Генерируется в HA: Профиль пользователя → Долговечные токены доступа → Создать токен.
                   </div>
@@ -4542,12 +4579,11 @@ data:
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        border: '1px solid rgba(255, 255, 255, 0.05)',
-                        opacity: alarm.enabled ? 1 : 0.6,
+                        border: alarm.enabled ? '1px solid rgba(255, 121, 198, 0.2)' : '1px solid rgba(255, 255, 255, 0.05)',
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                        <div style={{ fontSize: '1.8rem', fontWeight: 800, color: alarm.enabled ? '#fff' : '#8e8893', fontFamily: 'monospace' }}>
+                        <div style={{ fontSize: '1.8rem', fontWeight: 800, color: alarm.enabled ? '#ffffff' : '#b8b2be', fontFamily: 'monospace' }}>
                           {alarm.time}
                         </div>
                         <div>
@@ -5679,58 +5715,118 @@ data:
         )}
       </main>
 
-      {/* 3. Boykisser Info Modal */}
+      {/* Interactive Floating Boykisser Companion */}
+      <div className="m3-boykisser-companion">
+        <div
+          className="m3-boykisser-speech-bubble"
+          onClick={() => setIsBoykisserModalOpen(true)}
+          title="Нажми на меня!"
+        >
+          {activeTab === 'home' && 'Ты любишь настраивать станции, да? :3'}
+          {activeTab === 'music' && 'Мурр, включи классный трек! 🎵'}
+          {activeTab === 'assistant' && 'Спроси меня что-нибудь умное! ✨'}
+          {activeTab === 'hass' && 'Управляем твоим умным домиком 🏡'}
+          {activeTab === 'clock' && 'Не проспи обнимашки! ⏰'}
+          {activeTab === 'led' && 'Смотри как красиво светится кольцо! 🌈'}
+          {activeTab === 'terminal' && 'Хакерский бойкисер в терминале 💻'}
+          {activeTab === 'settings' && 'Тонкая настройка пушистой станции ⚙️'}
+          {activeTab === 'guide' && 'Читай инструкцию и целуйся! 🐾'}
+        </div>
+        <img
+          src={TAB_WATERMARKS[activeTab] || '/assets/boykisser/boykisser_3.png'}
+          alt="Boykisser Mascot"
+          className="m3-boykisser-mascot-img"
+          onClick={() => setIsBoykisserModalOpen(true)}
+          title="Погладить бойкисера :3"
+        />
+      </div>
+
+      {/* 3. Boykisser Info & Mascot Gallery Modal */}
       {isBoykisserModalOpen && (
         <div className="m3-modal-backdrop" onClick={() => setIsBoykisserModalOpen(false)}>
-          <div className="m3-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <div className="m3-modal-card" style={{ maxWidth: '640px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span className="material-symbols-rounded" style={{ color: '#ffb4c2', fontSize: '28px' }}>pets</span>
-                <h3 style={{ fontSize: '1.3rem', fontWeight: 700, color: '#fff' }}>Furry Station Info</h3>
+                <img src="/assets/boykisser/boykisser_2.png" alt="boykisser" style={{ width: '36px', height: '36px', borderRadius: '50%' }} />
+                <div>
+                  <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fff', margin: 0 }}>Furry Station • Boykisser Edition</h3>
+                  <div style={{ fontSize: '0.75rem', color: '#ffb4c2' }}>Ты любишь целовать мальчиков, да? :3</div>
+                </div>
               </div>
               <button
                 type="button"
-                style={{ background: 'transparent', border: 'none', color: '#c7c2c9', cursor: 'pointer' }}
+                style={{ background: 'transparent', border: 'none', color: '#c7c2c9', cursor: 'pointer', padding: '6px' }}
                 onClick={() => setIsBoykisserModalOpen(false)}
               >
                 <span className="material-symbols-rounded">close</span>
               </button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.88rem' }}>
-              <div style={{ background: '#17151a', padding: '12px 16px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#a49ea8' }}>Устройство:</span>
-                <span style={{ fontWeight: 700, color: '#ffb4c2' }}>Yandex Station Lite ({stationDisplayIp})</span>
+            {/* Boykisser Mascots Grid */}
+            <div style={{ marginBottom: '18px' }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#ded7e0', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Маскоты станции (5 эмоций):
               </div>
-              <div style={{ background: '#17151a', padding: '12px 16px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#a49ea8' }}>Архитектура:</span>
-                <span style={{ fontWeight: 700, color: '#fff' }}>aarch64-linux (Cortex-A53)</span>
-              </div>
-              <div style={{ background: '#17151a', padding: '12px 16px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#a49ea8' }}>Сервис:</span>
-                <span style={{ fontWeight: 700, color: '#78dc96' }}>Автономная колонка (Ассистент + Плеер)</span>
-              </div>
-              <div style={{ background: '#17151a', padding: '12px 16px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#a49ea8' }}>Устройство:</span>
-                <span style={{ fontWeight: 700, color: '#fff' }}>Yandex Station Lite ({stationDisplayIp})</span>
-              </div>
-              <div style={{ background: '#17151a', padding: '12px 16px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#a49ea8' }}>Конфигурация:</span>
-                <span style={{ fontWeight: 700, color: '#ffb4c2' }}>serde_json + Extra Payload (/api/config/assistant)</span>
-              </div>
-              <div style={{ background: '#17151a', padding: '12px 16px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#a49ea8' }}>Стиль интерфейса:</span>
-                <span style={{ fontWeight: 700, color: '#fff' }}>Material 3 Flat (Zero Borders)</span>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px' }}>
+                {BOYKISSER_MASCOTS.map((m) => (
+                  <div
+                    key={m.id}
+                    style={{
+                      background: '#1a1820',
+                      border: '1px solid rgba(255, 121, 198, 0.22)',
+                      borderRadius: '14px',
+                      padding: '10px 6px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'transform 0.2s ease, border-color 0.2s ease',
+                    }}
+                  >
+                    <img
+                      src={m.src}
+                      alt={m.name}
+                      style={{ width: '48px', height: '48px', objectFit: 'contain' }}
+                    />
+                    <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#ffb4c2' }}>
+                      {m.name}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
 
-            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.84rem' }}>
+              <div style={{ background: '#17151a', padding: '10px 14px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#a49ea8' }}>Устройство:</span>
+                <span style={{ fontWeight: 700, color: '#ffb4c2' }}>Yandex Station Lite ({stationDisplayIp})</span>
+              </div>
+              <div style={{ background: '#17151a', padding: '10px 14px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#a49ea8' }}>Платформа:</span>
+                <span style={{ fontWeight: 700, color: '#fff' }}>Amlogic AXG A113X (4 ядра Cortex-A53, aarch64)</span>
+              </div>
+              <div style={{ background: '#17151a', padding: '10px 14px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#a49ea8' }}>Аудио-тракт:</span>
+                <span style={{ fontWeight: 700, color: '#78dc96' }}>TI TAS5805M Digital Amp (I2S ALSA)</span>
+              </div>
+              <div style={{ background: '#17151a', padding: '10px 14px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#a49ea8' }}>Сервис:</span>
+                <span style={{ fontWeight: 700, color: '#78dc96' }}>Автономный демон Rust (LLM + STT + TTS + Home Assistant)</span>
+              </div>
+              <div style={{ background: '#17151a', padding: '10px 14px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#a49ea8' }}>Стиль интерфейса:</span>
+                <span style={{ fontWeight: 700, color: '#ffb4c2' }}>Material You 3 (Obsidian & Candy Pink)</span>
+              </div>
+            </div>
+
+            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button
                 type="button"
                 className="m3-btn m3-btn-primary"
                 onClick={() => setIsBoykisserModalOpen(false)}
+                style={{ padding: '8px 24px' }}
               >
-                <span>Закрыть</span>
+                <span>Мурр :3 Закрыть</span>
               </button>
             </div>
           </div>
